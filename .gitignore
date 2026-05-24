@@ -38,6 +38,8 @@ yarn-error.log*
 /zk_inputs/*.json
 /zk_proofs/*.json
 /circuits/generated/
+__pycache__/
+*.py[cod]
 
 # Local env and secrets
 .env

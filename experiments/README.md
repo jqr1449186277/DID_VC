@@ -33,6 +33,15 @@ bash experiments/runs/run_K_ttss_trace_cases.sh
 
 Experiment scripts default to paths relative to the repository root, so they can be run from the root directory without setting `PROJECT_ROOT`.
 
+Focused validation scripts live in `experiments/tests/`. For example:
+
+```bash
+bash experiments/tests/test_poseidon_native.sh
+SANITIZE=1 bash experiments/tests/test_poseidon_native.sh
+```
+
+The TTSS report summarizer is `experiments/tools/summarize_ttss_results.py`. Older fixed/variant copies were folded into this canonical script.
+
 ## Notes
 
 These scripts are intentionally more verbose and parameter-heavy than the stable `scripts/dev.sh` interface. They are kept out of `scripts/` so new users see the normal build/run workflow first.

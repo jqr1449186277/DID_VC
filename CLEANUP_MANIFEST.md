@@ -59,8 +59,7 @@ Primary scripts:
 - `scripts/start_stop.sh` - current environment orchestration script.
 - `scripts/setup_groth16.sh` - Groth16 setup script. Note: it references missing `scripts/compile_zk.sh`.
 - `scripts/run_state_leaf_check.sh`
-- `experiments/tests/test_poseidon_native_step1.sh`
-- `experiments/tests/test_poseidon_native_step12.sh`
+- `experiments/tests/test_poseidon_native.sh`
 - `scripts/run_G_zk_auth.sh`
 - `scripts/run_H_zk_recovery.sh`
 - `scripts/run_H_zk_recovery_batch.sh`
@@ -85,8 +84,7 @@ Primary scripts:
 - `scripts/leaf_utils.mjs`
 - `scripts/prepare_auth_input.mjs`
 - `scripts/summarize_chain_comm.py`
-- `scripts/summarize_ttss_results.py`
-- `scripts/summarize_ttss_results_fixed.py`
+- `experiments/tools/summarize_ttss_results.py`
 - `scripts/did_generate_experiment_figures.py`
 - `scripts/analyze_depth_nt_results*.py` and figure scripts under `results/` should be moved into `scripts/analysis/` if they are still used.
 
@@ -253,7 +251,6 @@ These may encode the working local environment and should be preserved until sta
 
 - `scripts/start_stop_n10.sh` - keep if 10-committee experiments are still active.
 - `scripts/run_M_ttss_nt_matrix_failstage*.sh` - keep if failure-stage analysis is part of the paper/report.
-- `scripts/summarize_ttss_results_fixed.py` - decide whether this replaces or supplements `summarize_ttss_results.py`.
 - `results/20260409_*_M_chain_comm_suite/` - decide which run is canonical.
 - `results/*.zip` - decide whether zip files or extracted directories are canonical.
 - `zk_build/ptau/pot20_final.ptau` - keep if the environment must rerun Groth16 setup without downloading/regenerating.

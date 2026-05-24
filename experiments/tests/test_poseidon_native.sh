@@ -2,9 +2,14 @@
 set -euo pipefail
 
 ROOT="${ROOT:-${PROJECT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}}"
-RUN_TAG="$(date +%Y%m%d_%H%M%S)_poseidon_native_step12"
+SANITIZE="${SANITIZE:-0}"
+RUN_NAME="poseidon_native"
+if [[ "$SANITIZE" == "1" ]]; then
+  RUN_NAME="${RUN_NAME}_asan"
+fi
+RUN_TAG="$(date +%Y%m%d_%H%M%S)_$RUN_NAME"
 RUN_DIR="$ROOT/results/$RUN_TAG"
-BIN="$RUN_DIR/test_poseidon_native_step12"
+BIN="$RUN_DIR/test_poseidon_native"
 LOG="$RUN_DIR/run.log"
 STATE_BIN="$ROOT/zk_build/state_leaf_check/state_leaf_check_cpp/state_leaf_check"
 STATE_SYM="$ROOT/zk_build/state_leaf_check/state_leaf_check.sym"
@@ -45,15 +50,19 @@ need_file "$PATH_JSON"
 
 chmod +x "$STATE_BIN"
 
-echo "[step1] compiling native poseidon test binary"
-g++ -std=c++17 -O2 -fsanitize=address -fno-omit-frame-pointer -I"$ROOT/cpp" \
+echo "[poseidon] compiling native poseidon test binary"
+COMPILE_FLAGS=(-std=c++17 -O2)
+if [[ "$SANITIZE" == "1" ]]; then
+  COMPILE_FLAGS+=(-fsanitize=address -fno-omit-frame-pointer)
+fi
+g++ "${COMPILE_FLAGS[@]}" -I"$ROOT/cpp" \
   "$ROOT/tests/cpp/test_poseidon_native.cpp" \
   "$ROOT/cpp/merkle_poseidon.cpp" \
   "$ROOT/cpp/text_utils.cpp" \
   -lgmpxx -lgmp \
   -o "$BIN"
 
-echo "[step1] native leaf/cid check against known vector"
+echo "[poseidon] native leaf/cid check against known vector"
 SID="$(jq -r '.sid' "$VECTOR_JSON")"
 RHO="$(jq -r '.rho' "$VECTOR_JSON")"
 PK_NORM="$(jq -r '.pkNormHash' "$VECTOR_JSON")"
@@ -72,7 +81,7 @@ LEAF_NATIVE_HEX="$(printf '%s\n' "$LEAF_OUT" | sed -n 's/^leaf=//p')"
 
 [[ "$CID_NATIVE_HEX" == "$CID_EXPECTED_HEX" ]] || { echo "cid mismatch: $CID_NATIVE_HEX != $CID_EXPECTED_HEX" >&2; exit 1; }
 [[ "$LEAF_NATIVE_HEX" == "$LEAF_EXPECTED_HEX" ]] || { echo "leaf mismatch: $LEAF_NATIVE_HEX != $LEAF_EXPECTED_HEX" >&2; exit 1; }
-echo "[step1] native vector match ok"
+echo "[poseidon] native vector match ok"
 
 jq -n \
   --arg sid "$SID" \
@@ -83,7 +92,7 @@ jq -n \
   --arg active "$ACTIVE" \
   '{sid:$sid, rho:$rho, pkNormHash:$pkNormHash, pkRecHash:$pkRecHash, ver:$ver, active:$active}' > "$INPUT_JSON"
 
-echo "[step1] StateLeafCheck witness alignment"
+echo "[poseidon] StateLeafCheck witness alignment"
 "$STATE_BIN" "$INPUT_JSON" "$WTNS_BIN"
 node "$SNARKJS_CLI" wtns export json "$WTNS_BIN" "$WTNS_JSON"
 CID_WIRE_IDX="$(awk -F, '$4=="main.cid" {print $1; exit}' "$STATE_SYM")"
@@ -93,9 +102,9 @@ CID_WITNESS_DEC="$(jq -r --argjson idx "$CID_WIRE_IDX" '.[$idx]' "$WTNS_JSON")"
 LEAF_WITNESS_DEC="$(jq -r --argjson idx "$LEAF_WIRE_IDX" '.[$idx]' "$WTNS_JSON")"
 [[ "$CID_WITNESS_DEC" == "$CID_EXPECTED_DEC" ]] || { echo "StateLeafCheck cid mismatch: $CID_WITNESS_DEC != $CID_EXPECTED_DEC" >&2; exit 1; }
 [[ "$LEAF_WITNESS_DEC" == "$LEAF_EXPECTED_DEC" ]] || { echo "StateLeafCheck leaf mismatch: $LEAF_WITNESS_DEC != $LEAF_EXPECTED_DEC" >&2; exit 1; }
-echo "[step1] StateLeafCheck aligned with native cid/leaf"
+echo "[poseidon] StateLeafCheck aligned with native cid/leaf"
 
-echo "[step1] root alignment on same path"
+echo "[poseidon] root alignment on same path"
 python3 - "$BIN" "$PATH_JSON" > "$RUN_DIR/native_root_output.txt" <<'PY'
 import json, subprocess, sys
 bin_path, path_json = sys.argv[1], sys.argv[2]
@@ -111,7 +120,7 @@ PY
 ROOT_NATIVE_HEX="$(cat "$RUN_DIR/native_root_output.txt")"
 ROOT_EXPECTED_HEX="$(jq -r '.root' "$PATH_JSON")"
 [[ "$ROOT_NATIVE_HEX" == "$ROOT_EXPECTED_HEX" ]] || { echo "root mismatch: $ROOT_NATIVE_HEX != $ROOT_EXPECTED_HEX" >&2; exit 1; }
-echo "[step1] path/root aligned"
+echo "[poseidon] path/root aligned"
 
 jq -n \
   --arg cidHex "$CID_NATIVE_HEX" \
@@ -130,8 +139,8 @@ jq -n \
     ]
   }' > "$REPORT_JSON"
 
-echo "[step1] PASS"
-echo "[step1] artifacts:"
+echo "[poseidon] PASS"
+echo "[poseidon] artifacts:"
 echo "  run dir : $RUN_DIR"
 echo "  report  : $REPORT_JSON"
 echo "  witness : $WTNS_JSON"
