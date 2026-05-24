@@ -2,6 +2,35 @@
 
 End-to-end DID demo with ZK auth, TTSS recovery, trace flow, committee nodes, and a local Hardhat chain.
 
+## Project Status
+
+DID E2E is an experimental research prototype. It demonstrates identity-state registration, ZK anonymous authentication, TTSS recovery and rotation, trace anchoring, and a local end-to-end development stack.
+
+Do not use this project in production. The repository uses local-chain accounts, demo tokens, development services, and experimental cryptographic flows. It has not been audited and does not protect real identities, credentials, funds, production keys, or regulated personal data.
+
+## Scope
+
+Currently supported:
+
+- local DID-like identity state registration on a Hardhat chain
+- normal-key update and recovery-key rotation paths
+- Poseidon-Merkle root anchoring and path generation
+- Groth16-backed ZK authentication against the active identity root
+- TTSS share setup, recovery, rotation, and committee-node storage
+- trace-flow simulation and trace result anchoring
+- Docker/native development stack, smoke checks, and core C++ tests
+
+Not yet supported:
+
+- registered W3C DID method
+- W3C-conformant DID Document resolver
+- DID URL dereferencing
+- DID deactivation operation
+- W3C Verifiable Credential issuance, wallet storage, presentation, or credential status
+- production key management, access control, monitoring, or deployment hardening
+
+See `docs/DID_METHOD.md` for method-design notes and `docs/API.md` for local API details.
+
 ## Quick Start
 
 ```bash

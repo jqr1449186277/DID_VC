@@ -28,6 +28,9 @@ jobs:
           ./build/did_demo_zk --help
           ./build/committee_node --help
 
+      - name: Core C++ tests
+        run: scripts/run_cpp_tests.sh
+
   hardhat:
     runs-on: ubuntu-latest
     steps:
