@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cpp-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl jq libgmp-dev libsodium-dev nlohmann-json3-dev nodejs npm python3
+
+      - name: Shell syntax
+        run: |
+          find scripts experiments -name '*.sh' -print0 | xargs -0 bash -n
+
+      - name: C++ warning build
+        run: |
+          CXXFLAGS_EXTRA="-Wall -Wextra -Wpedantic" scripts/build.sh all
+
+      - name: CLI smoke-lite
+        run: |
+          ./build/did_demo_zk --help
+          ./build/committee_node --help
+
+  hardhat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Hardhat dependencies
+        working-directory: hardhat
+        run: npm ci
+
+      - name: Solidity compile
+        working-directory: hardhat
+        run: |
+          npx hardhat compile || {
+            echo "Hardhat compiler download failed; falling back to solcjs syntax compile"
+            mkdir -p /tmp/did-e2e-solc
+            npx solcjs --bin --abi contracts/DIDBulletinBoardZK.sol -o /tmp/did-e2e-solc
+          }
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose file
+        run: docker compose config

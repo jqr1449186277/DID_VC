@@ -1,0 +1,1 @@
+/home/spike/did-e2e/hardhat/scripts/fault_rules.sh

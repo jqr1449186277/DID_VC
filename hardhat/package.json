@@ -1,0 +1,23 @@
+{
+  "name": "hardhat",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0"
+  },
+  "dependencies": {
+    "body-parser": "^2.2.2",
+    "circomlibjs": "^0.1.7",
+    "ethers": "^6.16.0",
+    "express": "^5.2.1",
+    "libsodium-wrappers": "^0.8.2"
+  }
+}

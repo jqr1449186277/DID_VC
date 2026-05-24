@@ -1,0 +1,52 @@
+# Build artifacts
+/build/
+/bin/
+/_archive/
+*.d
+*.o
+*.so
+*.a
+*.dylib
+*.exe
+
+# Node dependencies and caches
+/node_modules/
+/hardhat/node_modules/
+/circuits/node_modules/
+/hardhat/cache/
+/hardhat/artifacts/
+.npm/
+.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime state
+/run/
+/logs/
+/hardhat/.bb_state.json
+/hardhat/bb_state.json
+/hardhat/bb_state_zk.json
+
+# Generated outputs
+/results/*
+!/results/.gitkeep
+!/results/*.py
+/experiments/results/
+/zk_build/
+/zk_proofs/
+/zk_inputs/*.json
+/zk_proofs/*.json
+/circuits/generated/
+
+# Local env and secrets
+.env
+.env.*
+!.env.example
+/config/*.local.env
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

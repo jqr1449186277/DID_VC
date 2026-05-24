@@ -1,0 +1,33 @@
+services:
+  did-dev:
+    build:
+      context: .
+    working_dir: /workspace
+    environment:
+      PROJECT_ROOT: /workspace
+      HARDHAT_DIR: /workspace/hardhat
+      CPP_DIR: /workspace/cpp
+      BUILD_DIR: /workspace/build
+      RUN_DIR: /workspace/run
+      LOG_DIR: /workspace/results/_logs
+      RESULTS_DIR: /workspace/results
+      RPC_URL: http://127.0.0.1:8545
+      BASE_URL: http://127.0.0.1:3000
+      DIDZK_VERIFY_SERVICE_HOST: 127.0.0.1
+      DIDZK_VERIFY_SERVICE_PORT: "3400"
+      PIRATE_PORT: "4000"
+      COMMITTEE_PORTS: "8001 8002 8003 8004 8005 8006"
+      SMOKE_TTSS_SETUP: "1"
+    ports:
+      - "8545:8545"
+      - "3000:3000"
+      - "3400:3400"
+      - "4000:4000"
+      - "8001-8006:8001-8006"
+    volumes:
+      - .:/workspace
+      - hardhat_node_modules:/workspace/hardhat/node_modules
+    command: bash -lc "if [ ! -d hardhat/node_modules ]; then cd hardhat && npm install && cd ..; fi && scripts/build.sh all && scripts/dev.sh up && tail -f /dev/null"
+
+volumes:
+  hardhat_node_modules:

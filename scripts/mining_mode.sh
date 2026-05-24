@@ -1,0 +1,1 @@
+/home/spike/did-e2e/hardhat/scripts/mining_mode.sh
