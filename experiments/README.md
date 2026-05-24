@@ -13,6 +13,7 @@ Use the scripts here when you want to reproduce or extend specific experiment ba
 - `runs/`: batch experiments and scenario suites.
 - `lib/`: experiment-only helpers such as chain/HTTP instrumentation.
 - `tools/`: summarizers, report builders, and figure generation scripts.
+- `tools/figures/`: legacy figure builders kept as reusable analysis tools.
 - `tests/`: focused research validation scripts that are not part of the default CI path.
 
 ## Common Usage

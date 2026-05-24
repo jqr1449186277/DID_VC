@@ -1,14 +1,14 @@
 {
-  "name": "hardhat",
+  "name": "did-e2e-hardhat",
   "version": "1.0.0",
-  "description": "",
+  "description": "Local Hardhat services and contract tooling for DID E2E.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.0"
