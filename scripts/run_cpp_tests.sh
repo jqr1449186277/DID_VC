@@ -14,16 +14,17 @@ compile() {
 }
 
 ensure_poseidon_constants() {
-  local constants="$ROOT/circuits/node_modules/circomlib/circuits/poseidon_constants.circom"
-  if [[ -f "$constants" ]]; then
+  local legacy_constants="$ROOT/circuits/node_modules/circomlib/circuits/poseidon_constants.circom"
+  local hardhat_constants="$ROOT/hardhat/node_modules/circomlibjs/src/poseidon_constants_opt.json"
+  if [[ -f "$legacy_constants" || -f "$hardhat_constants" ]]; then
     return 0
   fi
   if ! command -v npm >/dev/null 2>&1; then
     echo "missing Poseidon constants and npm is not available" >&2
     return 1
   fi
-  echo "[cpp-test] install circomlib for Poseidon constants"
-  npm install --prefix "$ROOT/circuits" --no-save --no-package-lock circomlib >/tmp/did-e2e-circomlib-install.log
+  echo "[cpp-test] install hardhat npm dependencies for Poseidon constants"
+  (cd "$ROOT/hardhat" && npm ci) >/tmp/did-e2e-hardhat-npm-ci.log
 }
 
 run_ttss_share_recovery_test() {

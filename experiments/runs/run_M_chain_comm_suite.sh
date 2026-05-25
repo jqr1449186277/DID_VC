@@ -7,8 +7,20 @@ ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/run/zk_chain_comm_env.sh}"
 MODE="${MODE:-ALL}"
 OUT_DIR="${OUT_DIR:-$PROJECT_ROOT/results/$(date +%Y%m%d_%H%M%S)_M_chain_comm_suite}"
 
-# shellcheck disable=SC1090
-source "$ENV_FILE"
+if [ -f "$ENV_FILE" ]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+else
+  RPC_URL="${RPC_URL:-http://127.0.0.1:8545}"
+  BB_ORIGIN_URL="${BB_ORIGIN_URL:-http://127.0.0.1:3000}"
+  PIRATE_ORIGIN_URL="${PIRATE_ORIGIN_URL:-http://127.0.0.1:4000}"
+  VERIFY_ORIGIN_URL="${VERIFY_ORIGIN_URL:-http://127.0.0.1:3400}"
+  COMMITTEE_ORIGIN_URLS="${COMMITTEE_ORIGIN_URLS:-http://127.0.0.1:8001,http://127.0.0.1:8002,http://127.0.0.1:8003,http://127.0.0.1:8004,http://127.0.0.1:8005,http://127.0.0.1:8006}"
+  HTTP_PROXY_BB_PORT="${HTTP_PROXY_BB_PORT:-3100}"
+  HTTP_PROXY_PIRATE_PORT="${HTTP_PROXY_PIRATE_PORT:-3101}"
+  HTTP_PROXY_VERIFY_PORT="${HTTP_PROXY_VERIFY_PORT:-3401}"
+  HTTP_PROXY_COMMITTEE_BASE_PORT="${HTTP_PROXY_COMMITTEE_BASE_PORT:-3201}"
+fi
 # shellcheck disable=SC1090
 source "$PROJECT_ROOT/experiments/lib/common_chain_comm.sh"
 
@@ -77,8 +89,13 @@ chain_comm_log "CHAIN_COMM_COMMITTEE_URLS=${CHAIN_COMM_COMMITTEE_URLS:-}"
 export BASE_URL="$CHAIN_COMM_BB_URL"
 export BB="$CHAIN_COMM_BB_URL"
 export COMMITTEE_URLS="$CHAIN_COMM_COMMITTEE_URLS"
+export PIRATE="${CHAIN_COMM_PIRATE_URL:-}"
 export PIRATE_URL="${CHAIN_COMM_PIRATE_URL:-}"
 export VERIFY_URL="${CHAIN_COMM_VERIFY_URL:-}"
+if [ -n "${CHAIN_COMM_VERIFY_URL:-}" ]; then
+  export VERIFY_HEALTH="$CHAIN_COMM_VERIFY_URL/health"
+  export DIDZK_VERIFY_SERVICE_HEALTH="$CHAIN_COMM_VERIFY_URL/health"
+fi
 
 run_G() {
   mkdir -p "$OUT_DIR/G"

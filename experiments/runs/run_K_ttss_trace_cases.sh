@@ -269,7 +269,7 @@ run_one_attempt(){
   local box_id="" trace_session_id="trace_${TS}_c${case_no}_r${run_no}_a${attempt_no}" oracle_result_type="" oracle_ok="0" trace_query_count="0"
   local box_id_hash="" box_ver="" box_epoch="" box_source="same_setup"
   local accused_set_size="0" accused_set="[]" hit_expected="0" exact_match="0" verify_accepted="0"
-  local expected_behavior="" 
+  local expected_behavior=""
 
   trap 'cleanup_box "$box_id"' RETURN
 

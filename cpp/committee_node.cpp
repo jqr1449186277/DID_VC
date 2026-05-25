@@ -370,19 +370,13 @@ static bool find_requested_envelope(const Json& body, CommitteeStore& store, Sto
   return true;
 }
 
-static void register_share_request_routes(httplib::Server& svr,
-                                          const CommitteeConfig& cfg,
-                                          CommitteeStore& store) {
-  auto serve_envelope_request = [&](const httplib::Request& req,
-                                    httplib::Response& res,
-                                    const std::string& endpoint_name) {
-    Json body;
-    try {
-      body = parse_json_body(req);
-    } catch (const std::exception& e) {
-      send_error(res, std::string("bad_json:") + e.what());
-      return;
-    }
+static void serve_share_envelope_request(const httplib::Request& req,
+                                         httplib::Response& res,
+                                         const std::string& endpoint_name,
+                                         const CommitteeConfig& cfg,
+                                         CommitteeStore& store) {
+  try {
+    Json body = parse_json_body(req);
     if (!require_token_json(body, cfg.token, res)) return;
     if (!maybe_simulate_network(cfg, res)) return;
 
@@ -394,14 +388,24 @@ static void register_share_request_routes(httplib::Server& svr,
         {"endpoint", endpoint_name},
         {"shareEnvelope", share_envelope_to_njson(stored.env)},
     });
-  };
+  } catch (const nlohmann::json::exception& e) {
+    std::cerr << "[committee_node] " << endpoint_name << " json_error: " << e.what() << "\n";
+    send_error(res, std::string("json_error:") + e.what(), 400);
+  } catch (const std::exception& e) {
+    std::cerr << "[committee_node] " << endpoint_name << " internal_error: " << e.what() << "\n";
+    send_error(res, std::string("internal_error:") + e.what(), 500);
+  }
+}
 
+static void register_share_request_routes(httplib::Server& svr,
+                                          const CommitteeConfig& cfg,
+                                          CommitteeStore& store) {
   svr.Post("/shareForRecover", [&](const httplib::Request& req, httplib::Response& res) {
-    serve_envelope_request(req, res, "shareForRecover");
+    serve_share_envelope_request(req, res, "shareForRecover", cfg, store);
   });
 
   svr.Post("/shareForTrace", [&](const httplib::Request& req, httplib::Response& res) {
-    serve_envelope_request(req, res, "shareForTrace");
+    serve_share_envelope_request(req, res, "shareForTrace", cfg, store);
   });
 }
 

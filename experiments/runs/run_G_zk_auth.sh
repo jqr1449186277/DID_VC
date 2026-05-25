@@ -47,6 +47,10 @@ run_one() {
   mkdir -p "$workdir"
 
   log "[run_G] >>> mode=$mode runs=$runs run_id=$run_id csv=$csv"
+  if (( runs <= 0 )); then
+    log "[run_G] skip mode=$mode because runs=$runs"
+    return 0
+  fi
 
   "$BIN" --zk_auth_e2e \
     --id "$run_id" \

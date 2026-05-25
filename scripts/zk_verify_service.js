@@ -6,13 +6,25 @@ const fs = require("fs");
 const path = require("path");
 const { performance } = require("perf_hooks");
 
-let snarkjs;
-try {
-  snarkjs = require("snarkjs");
-} catch (err) {
-  console.error("[zk-verify-service] failed to require snarkjs:", err && err.message ? err.message : String(err));
+function loadSnarkjs() {
+  const candidates = [
+    "snarkjs",
+    path.join(__dirname, "..", "hardhat", "node_modules", "snarkjs"),
+  ];
+  let firstError = null;
+  for (const candidate of candidates) {
+    try {
+      return require(candidate);
+    } catch (err) {
+      firstError = firstError || err;
+    }
+  }
+  console.error("[zk-verify-service] failed to require snarkjs:", firstError && firstError.message ? firstError.message : String(firstError));
+  console.error("[zk-verify-service] Run: cd hardhat && npm ci");
   process.exit(1);
 }
+
+const snarkjs = loadSnarkjs();
 
 const HOST = process.env.DIDZK_VERIFY_SERVICE_HOST || "127.0.0.1";
 const PORT = Number(process.env.DIDZK_VERIFY_SERVICE_PORT || "3400");

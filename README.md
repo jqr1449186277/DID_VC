@@ -29,7 +29,7 @@ Not yet supported:
 - W3C Verifiable Credential issuance, wallet storage, presentation, or credential status
 - production key management, access control, monitoring, or deployment hardening
 
-See `docs/DID_METHOD.md` for method-design notes and `docs/API.md` for local API details.
+See `docs/DID_METHOD.md` for method-design notes, `docs/API.md` for local API details, `docs/CONFIGURATION.md` for runtime configuration, and `docs/THREAT_MODEL.md` for security assumptions.
 
 ## Quick Start
 
@@ -126,7 +126,9 @@ run/ttss_phase5_smoke_last.json
 
 - `cpp/`: C++ client, committee node, ZK/TTSS/trace flows, and shared utilities.
 - `hardhat/`: smart contracts and Node.js services.
-- `scripts/`: build, development stack, smoke, experiments, and result summarizers.
+- `scripts/`: build, development-stack, ZK setup, and smoke-test entrypoints.
+- `experiments/`: maintained research runners, instrumentation helpers, and result summarizers.
+- `docs/`: API, architecture, configuration, testing, operations, and experiment notes.
 - `results/`: generated outputs and logs.
 - `run/`: local process state and environment files.
 
@@ -137,4 +139,9 @@ run/ttss_phase5_smoke_last.json
 - `scripts/start_stop.sh` remains the native stack orchestrator; `scripts/dev.sh` is the public entrypoint.
 - Architecture notes live in `docs/ARCHITECTURE.md`.
 - Operational notes live in `docs/OPERATIONS.md`.
+- Configuration notes live in `docs/CONFIGURATION.md`.
+- Test and CI notes live in `docs/TESTING.md`.
+- Experiment runner notes live in `docs/EXPERIMENTS.md`.
+- Threat model and dependency notes live in `docs/THREAT_MODEL.md` and `docs/DEPENDENCIES.md`.
+- Release notes and checklist live in `CHANGELOG.md` and `docs/RELEASE.md`.
 - CI is defined in `.github/workflows/ci.yml`.

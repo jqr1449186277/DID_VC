@@ -10,6 +10,7 @@
 #include <gmpxx.h>
 #include <iomanip>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -55,6 +56,30 @@ struct PoseidonRawConstants {
 
 std::mutex g_params_mu;
 std::unordered_map<int, PoseidonParams> g_params_cache;
+
+fs::path legacy_poseidon_constants_path(const fs::path& root) {
+  return root / "circuits" / "node_modules" / "circomlib" / "circuits" /
+         "poseidon_constants.circom";
+}
+
+fs::path circomlibjs_poseidon_constants_path(const fs::path& root) {
+  return root / "hardhat" / "node_modules" / "circomlibjs" / "src" /
+         "poseidon_constants_opt.json";
+}
+
+fs::path find_poseidon_constants_path(const fs::path& root) {
+  const fs::path legacy = legacy_poseidon_constants_path(root);
+  if (fs::exists(legacy)) return legacy;
+  const fs::path circomlibjs = circomlibjs_poseidon_constants_path(root);
+  if (fs::exists(circomlibjs)) return circomlibjs;
+  return {};
+}
+
+bool looks_like_project_root(const fs::path& root) {
+  return !find_poseidon_constants_path(root).empty() &&
+         fs::exists(root / "circuits" / "auth_membership.circom") &&
+         fs::exists(root / "scripts" / "leaf_utils.mjs");
+}
 
 
 bool starts_with_hex_prefix(const std::string& s) {
@@ -149,11 +174,7 @@ void record_stat(double* slot, const Clock::time_point& start) {
 fs::path find_project_root_from(const fs::path& start) {
   fs::path cur = fs::weakly_canonical(start);
   while (!cur.empty()) {
-    if (fs::exists(cur / "circuits" / "node_modules" / "circomlib" / "circuits" / "poseidon_constants.circom")) {
-      return cur;
-    }
-    if (fs::exists(cur / "scripts" / "leaf_utils.mjs") &&
-        fs::exists(cur / "circuits" / "node_modules" / "circomlib" / "circuits" / "poseidon_constants.circom")) {
+    if (looks_like_project_root(cur)) {
       return cur;
     }
     if (cur == cur.root_path()) break;
@@ -164,8 +185,13 @@ fs::path find_project_root_from(const fs::path& start) {
 
 fs::path poseidon_constants_path(const std::string& preferred_root) {
   const fs::path root = detect_project_root(preferred_root);
-  const fs::path p = root / "circuits" / "node_modules" / "circomlib" / "circuits" / "poseidon_constants.circom";
-  if (!fs::exists(p)) throw std::runtime_error("poseidon_constants_missing: " + p.string());
+  const fs::path p = find_poseidon_constants_path(root);
+  if (p.empty()) {
+    throw std::runtime_error(
+        "poseidon_constants_missing: tried " +
+        legacy_poseidon_constants_path(root).string() + " and " +
+        circomlibjs_poseidon_constants_path(root).string());
+  }
   return p;
 }
 
@@ -233,6 +259,44 @@ std::vector<mpz_class> collect_hex_tokens(const std::string& text) {
   return out;
 }
 
+std::vector<mpz_class> json_field_vector(const nlohmann::json& arr,
+                                         const std::string& label) {
+  if (!arr.is_array()) throw std::runtime_error("poseidon_json_vector_expected: " + label);
+  std::vector<mpz_class> out;
+  out.reserve(arr.size());
+  for (const auto& item : arr) {
+    if (!item.is_string()) throw std::runtime_error("poseidon_json_hex_expected: " + label);
+    out.push_back(normalize_fr(parse_field_value(item.get<std::string>())));
+  }
+  return out;
+}
+
+std::vector<mpz_class> json_field_matrix_flat(const nlohmann::json& matrix,
+                                             const std::string& label) {
+  if (!matrix.is_array()) throw std::runtime_error("poseidon_json_matrix_expected: " + label);
+  std::vector<mpz_class> out;
+  for (const auto& row : matrix) {
+    const std::vector<mpz_class> values = json_field_vector(row, label);
+    out.insert(out.end(), values.begin(), values.end());
+  }
+  return out;
+}
+
+const nlohmann::json& poseidon_json_for_t(const nlohmann::json& root,
+                                          const std::string& key,
+                                          int t) {
+  const int idx = t - 2;
+  if (idx < 0) throw std::runtime_error("poseidon_json_bad_t=" + std::to_string(t));
+  if (!root.contains(key) || !root.at(key).is_array()) {
+    throw std::runtime_error("poseidon_json_key_missing: " + key);
+  }
+  const auto& outer = root.at(key);
+  if (static_cast<std::size_t>(idx) >= outer.size()) {
+    throw std::runtime_error("poseidon_json_t_missing: " + key + ":t=" + std::to_string(t));
+  }
+  return outer.at(static_cast<std::size_t>(idx));
+}
+
 std::vector<std::vector<mpz_class>> reshape_matrix(const std::vector<mpz_class>& flat, int t) {
   if (flat.size() != static_cast<std::size_t>(t * t)) {
     throw std::runtime_error("poseidon_matrix_size_mismatch_t=" + std::to_string(t));
@@ -259,6 +323,16 @@ PoseidonRawConstants extract_poseidon_raw_constants(const std::string& content, 
   raw.S = extract_poseidon_vector(content, "POSEIDON_S", t);
   raw.M = extract_poseidon_vector(content, "POSEIDON_M", t);
   raw.P = extract_poseidon_vector(content, "POSEIDON_P", t);
+  return raw;
+}
+
+PoseidonRawConstants extract_poseidon_raw_constants_json(const std::string& content, int t) {
+  const nlohmann::json root = nlohmann::json::parse(content);
+  PoseidonRawConstants raw;
+  raw.C = json_field_vector(poseidon_json_for_t(root, "C", t), "C");
+  raw.S = json_field_vector(poseidon_json_for_t(root, "S", t), "S");
+  raw.M = json_field_matrix_flat(poseidon_json_for_t(root, "M", t), "M");
+  raw.P = json_field_matrix_flat(poseidon_json_for_t(root, "P", t), "P");
   return raw;
 }
 
@@ -290,7 +364,10 @@ PoseidonParams build_poseidon_params(int t, const PoseidonRawConstants& raw) {
 
 PoseidonParams load_poseidon_params_from_file(int t, const std::string& preferred_root) {
   const fs::path p = poseidon_constants_path(preferred_root);
-  const PoseidonRawConstants raw = extract_poseidon_raw_constants(read_text_file(p), t);
+  const std::string content = read_text_file(p);
+  const PoseidonRawConstants raw = p.extension() == ".json"
+      ? extract_poseidon_raw_constants_json(content, t)
+      : extract_poseidon_raw_constants(content, t);
   PoseidonParams params = build_poseidon_params(t, raw);
   return params;
 }
@@ -459,7 +536,7 @@ IdentityPoseidonBundle build_bundle(const IdentityStateZK& st, const MerklePathZ
 std::string detect_project_root(const std::string& preferred_root) {
   if (!preferred_root.empty()) {
     const fs::path candidate = fs::weakly_canonical(preferred_root);
-    if (fs::exists(candidate / "circuits" / "node_modules" / "circomlib" / "circuits" / "poseidon_constants.circom")) {
+    if (looks_like_project_root(candidate)) {
       return candidate.string();
     }
   }
@@ -467,7 +544,7 @@ std::string detect_project_root(const std::string& preferred_root) {
   const char* env_root = std::getenv("PROJECT_ROOT");
   if (env_root && *env_root) {
     const fs::path candidate = fs::weakly_canonical(env_root);
-    if (fs::exists(candidate / "circuits" / "node_modules" / "circomlib" / "circuits" / "poseidon_constants.circom")) {
+    if (looks_like_project_root(candidate)) {
       return candidate.string();
     }
   }

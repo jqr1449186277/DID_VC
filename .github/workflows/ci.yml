@@ -5,6 +5,29 @@ on:
   pull_request:
 
 jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tool versions
+        run: |
+          python3 --version
+          node --version
+
+      - name: Repository format
+        run: scripts/check_repo_format.sh
+
+      - name: Shell syntax
+        run: |
+          find scripts experiments -name '*.sh' -print0 | xargs -0 bash -n
+
+      - name: JavaScript syntax
+        run: scripts/check_js_syntax.sh
+
+      - name: Markdown links
+        run: scripts/check_markdown_links.py
+
   cpp-shell:
     runs-on: ubuntu-latest
     steps:
@@ -14,10 +37,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential curl jq libgmp-dev libsodium-dev nlohmann-json3-dev nodejs npm python3
-
-      - name: Shell syntax
-        run: |
-          find scripts experiments -name '*.sh' -print0 | xargs -0 bash -n
 
       - name: C++ warning build
         run: |
@@ -29,6 +48,37 @@ jobs:
           ./build/committee_node --help
 
       - name: Core C++ tests
+        run: scripts/run_cpp_tests.sh
+
+  cpp-sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl jq libgmp-dev libsodium-dev nlohmann-json3-dev nodejs npm python3
+
+      - name: Sanitizer build
+        env:
+          CXXFLAGS_EXTRA: -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+          LDFLAGS_EXTRA: -fsanitize=address,undefined
+        run: scripts/build.sh all
+
+      - name: Sanitizer CLI smoke-lite
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: |
+          ./build/did_demo_zk --help
+          ./build/committee_node --help
+
+      - name: Sanitizer C++ tests
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1
+          CXXFLAGS_EXTRA: -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
         run: scripts/run_cpp_tests.sh
 
   hardhat:

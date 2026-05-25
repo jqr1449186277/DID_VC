@@ -16,17 +16,14 @@
  *  - incremental mirror sync by block range
  */
 
-const fs = require("fs");
 const path = require("path");
 const express = require("express");
-
-let ethersPkg;
-try {
-  ethersPkg = require("ethers");
-} catch {
-  console.error("[bb_service_zk] missing dependency: ethers. Run: npm i ethers");
-  process.exit(1);
-}
+const { createChainClient, parseEthersError } = require("./chain_client");
+const { createMerkleTree } = require("./merkle_tree");
+const { loadState, initializeRuntimeState, createStatePersistence } = require("./state_store");
+const { registerRegisterRoutes } = require("./routes_register");
+const { registerTTSSRoutes } = require("./routes_ttss");
+const { registerTraceRoutes } = require("./routes_trace");
 
 let circomlib;
 try {
@@ -35,15 +32,6 @@ try {
   console.error("[bb_service_zk] missing dependency: circomlibjs. Run: npm i circomlibjs");
   process.exit(1);
 }
-
-const JsonRpcProvider = ethersPkg.JsonRpcProvider || (ethersPkg.providers && ethersPkg.providers.JsonRpcProvider);
-const WebSocketProvider = ethersPkg.WebSocketProvider || (ethersPkg.providers && ethersPkg.providers.WebSocketProvider);
-const Wallet = ethersPkg.Wallet;
-const Contract = ethersPkg.Contract;
-const getAddress = ethersPkg.getAddress || (ethersPkg.utils && ethersPkg.utils.getAddress);
-const isHexString = ethersPkg.isHexString || (ethersPkg.utils && ethersPkg.utils.isHexString);
-const parseEther = ethersPkg.parseEther || (ethersPkg.utils && ethersPkg.utils.parseEther);
-const idFn = ethersPkg.id || (ethersPkg.utils && ethersPkg.utils.id);
 
 const RPC_URL = process.env.RPC_URL || "http://127.0.0.1:8545";
 const CONTRACT_ADDR = process.env.CONTRACT;
@@ -64,49 +52,22 @@ if (!CONTRACT_ADDR) {
   process.exit(1);
 }
 
-const ABI = [
-  "function records(bytes32) view returns (bytes32 cid, address owner, address recovery, uint64 version, bool active, bytes32 pkNormHash, bytes32 pkRecHash)",
-  "function activeRoot() view returns (bytes32)",
-  "function rootEpoch() view returns (uint64)",
-  "function rootUpdater() view returns (address)",
-  "function ttssVkSetHashOf(bytes32) view returns (bytes32)",
-  "function ttssMetaHashOf(bytes32) view returns (bytes32)",
-  "function ttssMetaVersionOf(bytes32) view returns (uint64)",
-  "function ttssMetaEpochOf(bytes32) view returns (uint64)",
-  "function lastTraceAccusedSetHashOf(bytes32) view returns (bytes32)",
-  "function lastTraceProofHashOf(bytes32) view returns (bytes32)",
-  "function lastTraceDigestOf(bytes32) view returns (bytes32)",
-  "function lastTraceVersionOf(bytes32) view returns (uint64)",
-  "function lastTraceEpochOf(bytes32) view returns (uint64)",
-  "function getTTSSMeta(bytes32 idHash) view returns (bytes32 vkSetHash, bytes32 metaHash, uint64 ver, uint64 epoch)",
-  "function getTraceAnchor(bytes32 idHash) view returns (bytes32 accusedSetHash, bytes32 proofHash, bytes32 traceDigest, uint64 ver, uint64 epoch)",
-  "function setTTSSMeta(bytes32 idHash, uint64 ver, uint64 epoch, bytes32 vkSetHash, bytes32 metaHash)",
-  "function publishTraceResult(bytes32 idHash, uint64 ver, uint64 epoch, bytes32 accusedSetHash, bytes32 proofHash, bytes32 traceDigest)",
-  "function registerZK(bytes32 idHash, bytes32 cid, bytes32 pkNormHash, bytes32 pkRecHash, address owner, address recovery)",
-  "function applyUpdateZK(bytes32 idHash, bytes32 newCid, bytes32 pkNormHash, bytes32 pkRecHash, uint64 newVersion)",
-  "function applyRecoveryRotateZK(bytes32 idHash, bytes32 newCid, bytes32 pkNormHash, bytes32 pkRecHash, uint64 newVersion, address newOwner, address newRecovery)",
-  "function setActiveRoot(bytes32 newRoot, uint64 newEpoch)",
-  "event RegisteredZK(bytes32 indexed idHash, bytes32 cid, bytes32 pkNormHash, bytes32 pkRecHash, address owner, address recovery)",
-  "event TTSSMetaUpdated(bytes32 indexed idHash, uint64 indexed ver, uint64 indexed epoch, bytes32 vkSetHash, bytes32 metaHash)",
-  "event TraceResultPublished(bytes32 indexed idHash, uint64 indexed ver, uint64 indexed epoch, bytes32 accusedSetHash, bytes32 proofHash, bytes32 traceDigest)",
-  "event UpdatedZK(bytes32 indexed idHash, bytes32 newCid, bytes32 pkNormHash, bytes32 pkRecHash, uint64 newVersion)",
-  "event RecoveredZK(bytes32 indexed idHash, bytes32 newCid, bytes32 pkNormHash, bytes32 pkRecHash, uint64 newVersion, address newOwner, address newRecovery)",
-  "event RootUpdated(bytes32 indexed newRoot, uint64 indexed newEpoch)"
-];
-
-let provider;
-if (/^wss?:\/\//.test(RPC_URL)) {
-  provider = new WebSocketProvider(RPC_URL);
-  console.log(`[bb_service_zk] WebSocketProvider ${RPC_URL}`);
-} else {
-  provider = new JsonRpcProvider(RPC_URL);
-  provider.pollingInterval = POLL_MS;
-  console.log(`[bb_service_zk] JsonRpcProvider ${RPC_URL}, polling=${POLL_MS}ms`);
-}
-
-const contract = new Contract(CONTRACT_ADDR, ABI, provider);
-const rootUpdaterWallet = new Wallet(ROOT_UPDATER_PRIVKEY, provider);
-const rootUpdaterContract = contract.connect(rootUpdaterWallet);
+const {
+  Wallet,
+  getAddress,
+  isHexString,
+  parseEther,
+  idFn,
+  provider,
+  contract,
+  rootUpdaterWallet,
+  rootUpdaterContract,
+} = createChainClient({
+  rpcUrl: RPC_URL,
+  contractAddress: CONTRACT_ADDR,
+  pollMs: POLL_MS,
+  rootUpdaterPrivkey: ROOT_UPDATER_PRIVKEY,
+});
 
 function bodyString(v) { return typeof v === "string" ? v.trim() : ""; }
 function nowMs() { return Date.now(); }
@@ -122,11 +83,6 @@ function fieldToHex(x) {
   return "0x" + h;
 }
 function poseidonHash(inputs) { const out = poseidon(inputs.map((v) => bn(v))); return bn(F.toString(out)); }
-function parseEthersError(e) {
-  if (!e) return "unknown";
-  const short = e.shortMessage || e.reason || e.message || String(e);
-  return String(short).replace(/\s+/g, " ").trim().slice(0, 320);
-}
 function walletFromSeedHex(seedHex) { return new Wallet(seedHex, provider); }
 
 function traceStepEnter(step, meta = {}) {
@@ -144,83 +100,12 @@ function traceStepError(step, startedAt, err, meta = {}) {
 }
 function logInfo(tag, meta = {}) { console.error(`[${tag}] ${JSON.stringify(meta)}`); }
 
-function loadState() {
-  try {
-    const raw = fs.readFileSync(STATE_FILE, "utf8");
-    const st = JSON.parse(raw);
-    if (!st || typeof st !== "object") throw new Error("bad_state");
-    return {
-      keys: st.keys || {},
-      mirror: st.mirror || {},
-      idByHash: st.idByHash || {},
-      ops: st.ops || {},
-      requestToOp: st.requestToOp || {},
-      meta: st.meta || {},
-      ttssMeta: st.ttssMeta || {},
-      traceAnchors: st.traceAnchors || {},
-    };
-  } catch {
-    return { keys: {}, mirror: {}, idByHash: {}, ops: {}, requestToOp: {}, meta: {}, ttssMeta: {}, traceAnchors: {} };
-  }
-}
-
-const state = loadState();
-state.meta.lastSyncedBlock = Number(state.meta.lastSyncedBlock || 0);
-state.meta.rebuildSeq = Number(state.meta.rebuildSeq || 0);
-state.rootCache = state.rootCache || { root: "0x" + "00".repeat(32), epoch: 0, depth: TREE_DEPTH, builtAt: 0 };
-state.chainCache = state.chainCache || { root: "0x" + "00".repeat(32), epoch: 0, checkedAt: 0, block: 0 };
-state.pathCache = state.pathCache || {};
-state.leafCache = state.leafCache || {};
-state.cacheBootstrapped = state.cacheBootstrapped || false;
-state.cacheStale = state.cacheStale !== undefined ? !!state.cacheStale : true;
-state.rebuildInFlight = false;
-state.rebuildDirty = false;
-state.fullSyncRequested = false;
-state.pendingAffectedIds = [];
-state.pendingOpIds = [];
-state.ttssMeta = state.ttssMeta || {};
-state.traceAnchors = state.traceAnchors || {};
-
-function snapshotPersistentState() {
-  return JSON.stringify({
-    keys: state.keys,
-    mirror: state.mirror,
-    idByHash: state.idByHash,
-    ops: state.ops,
-    requestToOp: state.requestToOp,
-    meta: state.meta,
-    ttssMeta: state.ttssMeta,
-    traceAnchors: state.traceAnchors,
-    rootCache: state.rootCache,
-    chainCache: state.chainCache,
-    cacheBootstrapped: state.cacheBootstrapped,
-    cacheStale: state.cacheStale,
-  }, null, 2);
-}
-
-let flushTimer = null;
-let flushInFlight = false;
-let flushPending = false;
-function saveState() { scheduleStateFlush(); }
-function scheduleStateFlush() {
-  flushPending = true;
-  if (flushTimer) return;
-  flushTimer = setTimeout(async () => {
-    flushTimer = null;
-    if (flushInFlight || !flushPending) return;
-    flushPending = false;
-    flushInFlight = true;
-    try {
-      await fs.promises.writeFile(STATE_FILE, snapshotPersistentState());
-    } catch (e) {
-      console.warn(`[bb_service_zk] state flush failed: ${parseEthersError(e)}`);
-      flushPending = true;
-    } finally {
-      flushInFlight = false;
-      if (flushPending) scheduleStateFlush();
-    }
-  }, 150);
-}
+const state = initializeRuntimeState(loadState(STATE_FILE), { treeDepth: TREE_DEPTH });
+const { saveState } = createStatePersistence({
+  stateFile: STATE_FILE,
+  state,
+  formatError: parseEthersError,
+});
 
 function rememberId(id) {
   const raw = bodyString(id);
@@ -522,227 +407,28 @@ async function hardhatSetBalance(addr, ethStr = "1000") {
 
 let poseidon = null;
 let F = null;
-const treeCache = {
-  zeroes: [],
-  activeEntries: [],
-  indexById: {},
-  idByIndex: {},
-  leafById: {},
-  leafFieldById: {},
-  rootField: 0n,
-  rootHex: "0x" + "00".repeat(32),
-  levels: [],
-  nodeCache: [],
-  activeCount: 0,
-};
-function buildZeroes(depth) {
-  const zeroes = new Array(depth + 1);
-  zeroes[0] = poseidonHash([0n, 0n, 0n, 0n, 0n]);
-  for (let i = 1; i <= depth; i++) zeroes[i] = poseidonHash([zeroes[i - 1], zeroes[i - 1]]);
-  return zeroes;
-}
-function computeLeafFromMirror(rec) {
-  return poseidonHash([
-    hexToField(rec.cid),
-    hexToField(rec.pkNormHash),
-    hexToField(rec.pkRecHash),
-    BigInt(rec.version),
-    1n,
-  ]);
-}
-function yieldImmediate() {
-  return new Promise((resolve) => setImmediate(resolve));
-}
-function treeCapacity() {
-  return 1 << TREE_DEPTH;
-}
-function preferredIndexForIdHash(idHash) {
-  const mask = (1n << BigInt(TREE_DEPTH)) - 1n;
-  return Number(BigInt(String(idHash)) & mask);
-}
-function initSparseTreeCache() {
-  treeCache.activeEntries = [];
-  treeCache.indexById = {};
-  treeCache.idByIndex = {};
-  treeCache.leafById = {};
-  treeCache.leafFieldById = {};
-  treeCache.levels = [];
-  treeCache.nodeCache = Array.from({ length: TREE_DEPTH + 1 }, () => new Map());
-  treeCache.activeCount = 0;
-  treeCache.rootField = treeCache.zeroes[TREE_DEPTH];
-  treeCache.rootHex = fieldToHex(treeCache.rootField);
-  state.pathCache = {};
-  state.leafCache = {};
-}
-function getNodeValue(level, index) {
-  const m = treeCache.nodeCache[level];
-  if (!m) return treeCache.zeroes[level];
-  return m.has(index) ? m.get(index) : treeCache.zeroes[level];
-}
-function setNodeValue(level, index, value) {
-  const m = treeCache.nodeCache[level];
-  if (!m) return;
-  if (value === treeCache.zeroes[level]) m.delete(index);
-  else m.set(index, value);
-}
-function assignIndexForIdHash(idHash) {
-  if (treeCache.indexById[idHash] !== undefined) return treeCache.indexById[idHash];
-  const capacity = treeCapacity();
-  let idx = preferredIndexForIdHash(idHash);
-  for (let steps = 0; steps < capacity; steps++) {
-    const occupant = treeCache.idByIndex[idx];
-    if (!occupant || occupant === idHash) {
-      treeCache.indexById[idHash] = idx;
-      treeCache.idByIndex[idx] = idHash;
-      return idx;
-    }
-    idx = (idx + 1) % capacity;
-  }
-  throw new Error(`tree_capacity_exceeded:no_free_slot_for:${idHash}`);
-}
-function releaseIndexForIdHash(idHash) {
-  const idx = treeCache.indexById[idHash];
-  if (idx === undefined) return null;
-  delete treeCache.indexById[idHash];
-  if (treeCache.idByIndex[idx] === idHash) delete treeCache.idByIndex[idx];
-  return idx;
-}
-function updateSparseLeafAtIndex(index, leafField) {
-  if (leafField === null || leafField === undefined) setNodeValue(0, index, treeCache.zeroes[0]);
-  else setNodeValue(0, index, leafField);
-
-  let idx = index;
-  for (let level = 0; level < TREE_DEPTH; level++) {
-    const base = idx & ~1;
-    const left = getNodeValue(level, base);
-    const right = getNodeValue(level, base + 1);
-    const parent = poseidonHash([left, right]);
-    idx >>= 1;
-    setNodeValue(level + 1, idx, parent);
-  }
-  treeCache.rootField = getNodeValue(TREE_DEPTH, 0);
-  treeCache.rootHex = fieldToHex(treeCache.rootField);
-}
-function updateLeafCachesForId(rawId, idHash, rec, leafField) {
-  const leafHex = fieldToHex(leafField);
-  treeCache.leafFieldById[idHash] = leafField;
-  treeCache.leafById[idHash] = leafHex;
-  state.leafCache[rawId] = {
-    idHash,
-    cid: rec.cid,
-    pkNormHash: rec.pkNormHash,
-    pkRecHash: rec.pkRecHash,
-    version: rec.version,
-    active: 1,
-    leaf: leafHex,
-  };
-}
-function removeCachesForId(rawId, idHash) {
-  delete treeCache.leafFieldById[idHash];
-  delete treeCache.leafById[idHash];
-  delete state.leafCache[rawId];
-  delete state.pathCache[rawId];
-}
-function recomputePathCacheForId(rawId) {
-  const id = bodyString(rawId);
-  if (!id) return null;
-  const idHash = rememberId(id);
-  const idx0 = treeCache.indexById[idHash];
-  if (idx0 === undefined) {
-    delete state.pathCache[id];
-    return null;
-  }
-  const leafHex = treeCache.leafById[idHash] || fieldToHex(getNodeValue(0, idx0));
-  const pathElements = [];
-  const pathIndex = [];
-  let idx = idx0;
-  for (let level = 0; level < TREE_DEPTH; level++) {
-    const sib = idx ^ 1;
-    pathElements.push(fieldToHex(getNodeValue(level, sib)));
-    pathIndex.push(idx & 1);
-    idx >>= 1;
-  }
-  state.pathCache[id] = {
-    idHash,
-    depth: TREE_DEPTH,
-    index: idx0,
-    leaf: leafHex,
-    root: treeCache.rootHex,
-    epoch: state.chainCache.epoch || state.rootCache.epoch || 0,
-    pathElements,
-    pathIndex,
-  };
-  return state.pathCache[id];
-}
-function refreshActiveEntriesView() {
-  const ids = Object.keys(treeCache.indexById).sort((a, b) => treeCache.indexById[a] - treeCache.indexById[b]);
-  treeCache.activeEntries = ids.map((idHash) => ({ id: idHash, index: treeCache.indexById[idHash], rec: state.mirror[idHash] })).filter((x) => x.rec && x.rec.active);
-  treeCache.activeCount = treeCache.activeEntries.length;
-}
-async function fullRebuildSparseTreeFromMirror(preheatIds = []) {
-  const t = traceStepEnter("rebuildTreeCacheFromMirror", { mode: "full_sparse", activeMirror: Object.keys(state.mirror || {}).length, preheatIds: preheatIds.length, chunk: REBUILD_CHUNK });
-  try {
-    const activeEntries = Object.entries(state.mirror)
-      .filter(([, rec]) => rec && rec.active)
-      .sort((a, b) => a[0].localeCompare(b[0]));
-    const capacity = treeCapacity();
-    if (activeEntries.length > capacity) throw new Error(`tree_capacity_exceeded:${activeEntries.length}>${capacity}`);
-    initSparseTreeCache();
-    let warmed = 0;
-    for (let i = 0; i < activeEntries.length; i++) {
-      const [idHash, rec] = activeEntries[i];
-      const idx = assignIndexForIdHash(idHash);
-      const leaf = computeLeafFromMirror(rec);
-      updateSparseLeafAtIndex(idx, leaf);
-      const rawId = state.idByHash[idHash] || idHash;
-      updateLeafCachesForId(rawId, idHash, rec, leaf);
-      if (((i + 1) % REBUILD_CHUNK) === 0) await yieldImmediate();
-    }
-    refreshActiveEntriesView();
-    const idsToPreheat = new Set();
-    for (const id of preheatIds) if (bodyString(id)) idsToPreheat.add(bodyString(id));
-    for (const rawId of idsToPreheat) {
-      if (recomputePathCacheForId(rawId)) warmed += 1;
-      if ((warmed % REBUILD_CHUNK) === 0) await yieldImmediate();
-    }
-    traceStepExit("rebuildTreeCacheFromMirror", t, { mode: "full_sparse", activeCount: treeCache.activeEntries.length, root: treeCache.rootHex, warmed });
-    return { activeCount: treeCache.activeEntries.length, warmed, root: treeCache.rootHex };
-  } catch (e) {
-    traceStepError("rebuildTreeCacheFromMirror", t, e, { mode: "full_sparse" });
-    throw e;
-  }
-}
-async function incrementalUpdateTreeCacheFromMirror(affectedIds = [], preheatIds = []) {
-  const t = traceStepEnter("rebuildTreeCacheFromMirror", { mode: "incremental_sparse", affectedIds: affectedIds.length, preheatIds: preheatIds.length });
-  try {
-    if (!state.cacheBootstrapped || !treeCache.nodeCache || treeCache.nodeCache.length === 0) {
-      return await fullRebuildSparseTreeFromMirror(preheatIds);
-    }
-    const affectedRawIds = [...new Set((affectedIds || []).map((x) => bodyString(x)).filter(Boolean))];
-    const preheatRawIds = [...new Set((preheatIds || []).map((x) => bodyString(x)).filter(Boolean))];
-    for (const rawId of affectedRawIds) {
-      const idHash = rememberId(rawId);
-      const rec = state.mirror[idHash];
-      if (!rec || !rec.active) {
-        const oldIdx = releaseIndexForIdHash(idHash);
-        if (oldIdx !== null) updateSparseLeafAtIndex(oldIdx, null);
-        removeCachesForId(rawId, idHash);
-        continue;
-      }
-      const idx = assignIndexForIdHash(idHash);
-      const leaf = computeLeafFromMirror(rec);
-      updateSparseLeafAtIndex(idx, leaf);
-      updateLeafCachesForId(rawId, idHash, rec, leaf);
-    }
-    refreshActiveEntriesView();
-    for (const rawId of preheatRawIds) recomputePathCacheForId(rawId);
-    traceStepExit("rebuildTreeCacheFromMirror", t, { mode: "incremental_sparse", activeCount: treeCache.activeEntries.length, root: treeCache.rootHex, warmed: preheatRawIds.length });
-    return { activeCount: treeCache.activeEntries.length, warmed: preheatRawIds.length, root: treeCache.rootHex };
-  } catch (e) {
-    traceStepError("rebuildTreeCacheFromMirror", t, e, { mode: "incremental_sparse" });
-    throw e;
-  }
-}
+const merkleTree = createMerkleTree({
+  state,
+  treeDepth: TREE_DEPTH,
+  rebuildChunk: REBUILD_CHUNK,
+  poseidonHash,
+  hexToField,
+  fieldToHex,
+  bodyString,
+  rememberId,
+  traceStepEnter,
+  traceStepExit,
+  traceStepError,
+});
+const {
+  treeCache,
+  buildZeroes,
+  computeLeafFromMirror,
+  updateLeafCachesForId,
+  recomputePathCacheForId,
+  fullRebuildSparseTreeFromMirror,
+  incrementalUpdateTreeCacheFromMirror,
+} = merkleTree;
 
 async function safeQueryFilter(filter, fromBlock = 0, toBlock = "latest") {
   try {
@@ -1632,6 +1318,51 @@ function buildInlineReadySnapshotFromCache(rawId, rawMinVersion) {
   };
 }
 
+function createRouteContext() {
+  return {
+    state,
+    contract,
+    rootUpdaterWallet,
+    rootUpdaterContract,
+    nowMs,
+    bodyString,
+    semicolonKV,
+    ensure0x64,
+    walletFromSeedHex,
+    getAddress,
+    defaultRequestKey,
+    getOpByRequestKey,
+    opResponseKV,
+    createOperation,
+    updateOperation,
+    failOperation,
+    updateOperationReadinessFromCache,
+    buildInlineReadySnapshotFromCache,
+    getOrCreateKeySlot,
+    saveState,
+    rememberId,
+    resolveIdAndHash,
+    getRecordOnchain,
+    getRecordByIdHashOnchain,
+    getTTSSMetaOnchain,
+    zeroHex32,
+    hardhatSetBalance,
+    sendContractTxLocked,
+    waitForTxAndRefresh,
+    scheduleTxSettlement,
+    refreshMirrorEntryFromChain,
+    runInlineReadyRefresh,
+    ensureSnapshotFreshForVersion,
+    maybeInlineTTSSMeta,
+    scheduleDeferredTTSSMetaAttach,
+    ttssMetaMatchesLocalEntry,
+    buildTTSSMetaEffective,
+    storeTTSSMetaLocal,
+    storeTraceAnchorLocal,
+    parseEthersError,
+  };
+}
+
 app.get("/health", async (_req, res) => {
   try {
     res.type("text/plain").send(semicolonKV({
@@ -1750,629 +1481,14 @@ app.get("/registerStatus", async (req, res) => {
   }
 });
 
-app.post("/registerZk", async (req, res) => {
-  const t0 = nowMs();
-  try {
-    const body = req.body || {};
-    const id = bodyString(body.id);
-    const cidHex = ensure0x64(body.cidHex);
-    const pkNormHash = ensure0x64(body.pkNormHash);
-    const pkRecHash = ensure0x64(body.pkRecHash);
-    const ownerSeedHex = ensure0x64(body.ownerSeedHex);
-    const recoverySeedHex = ensure0x64(body.recoverySeedHex);
-    const waitRaw = (body.wait ?? "0");
-    const waitConfirm = String(waitRaw) === "1";
-    const confirmations = Math.max(1, parseInt(String(body.confirmations ?? "1"), 10));
-    const includeSnapshot = String(body.includeSnapshot ?? "0") === "1";
-    const ttssSetupModeRaw = bodyString(body.ttssSetupMode || "deferred");
-    const ttssSetupMode = ttssSetupModeRaw === "inline" || ttssSetupModeRaw === "off" ? ttssSetupModeRaw : "deferred";
-    const requestKey = defaultRequestKey("register", id, body.requestId);
-
-    if (!id) return res.type("text/plain").send("ok=0;err=missing_id");
-    if (!cidHex || !pkNormHash || !pkRecHash) return res.type("text/plain").send("ok=0;err=bad_hex");
-    if (!ownerSeedHex || !recoverySeedHex) return res.type("text/plain").send("ok=0;err=bad_seedHex");
-
-    const existing = getOpByRequestKey(requestKey);
-    if (existing && existing.status !== "FAILED") {
-      const fresh = await updateOperationReadinessFromCache(existing.opId);
-      const extra = { idempotent: 1, total_ms: nowMs() - t0, ttssDeferredScheduled: 0, ...(includeSnapshot ? buildInlineReadySnapshotFromCache(id, 0) : {}) };
-      return res.type("text/plain").send(semicolonKV(opResponseKV(fresh, extra)));
-    }
-
-    const ownerW = walletFromSeedHex(ownerSeedHex);
-    const recoveryW = walletFromSeedHex(recoverySeedHex);
-    await hardhatSetBalance(ownerW.address, "1000");
-    await hardhatSetBalance(recoveryW.address, "1000");
-
-    const keySlot = getOrCreateKeySlot(id);
-    keySlot.ownerSeedHex = ownerSeedHex;
-    keySlot.recoverySeedHex = recoverySeedHex;
-    saveState();
-
-    const idHash = rememberId(id);
-    const op = createOperation("register", id, requestKey, { status: "ACCEPTED", owner: ownerW.address, recovery: recoveryW.address, minVersion: 0, currentVersion: 0, currentRoot: state.rootCache.root, currentEpoch: state.rootCache.epoch });
-
-    try {
-      const tx = await sendContractTxLocked(
-        rootUpdaterWallet,
-        (ov) => rootUpdaterContract.registerZK(idHash, cidHex, pkNormHash, pkRecHash, ownerW.address, recoveryW.address, ov),
-        { label: "/registerZk:registerZK" }
-      );
-      const mirrorPatch = async () => {
-        state.mirror[idHash] = { idHash, cid: cidHex, pkNormHash, pkRecHash, owner: getAddress(ownerW.address), recovery: getAddress(recoveryW.address), version: 0, active: true };
-        saveState();
-      };
-      updateOperation(op.opId, { txHash: tx && tx.hash ? String(tx.hash) : "", submitMs: nowMs() - t0 });
-
-      let gas = "";
-      let settled = null;
-      if (waitConfirm) {
-        settled = await waitForTxAndRefresh(tx, { confirmations, id, reason: "http:/registerZk", opId: op.opId, onMirrorPatch: mirrorPatch, awaitReady: true });
-        gas = settled.receipt && settled.receipt.gasUsed ? settled.receipt.gasUsed.toString() : "";
-      } else {
-        scheduleTxSettlement(tx, { confirmations, id, reason: "txwait:/registerZk", opId: op.opId, onMirrorPatch: mirrorPatch, awaitReady: true });
-      }
-
-      const fresh = waitConfirm ? (await updateOperationReadinessFromCache(op.opId)) : (state.ops[op.opId] || op);
-      const actualEpoch = settled && settled.recompute && settled.recompute.epoch !== undefined ? Number(settled.recompute.epoch) : Number(fresh.currentEpoch !== undefined ? fresh.currentEpoch : state.rootCache.epoch || 0);
-      const ttssAttachBase = { ttssMerged: false, ttssVkSetHash: "", ttssMetaHash: "", ttssMetaTxHash: "", ttssEpoch: 0, ttssMergeScheduled: 0 };
-      let ttssAttach = ttssAttachBase;
-      if (waitConfirm) {
-        if (ttssSetupMode === "inline") {
-          ttssAttach = { ...ttssAttachBase, ...(await maybeInlineTTSSMeta({ body, id, idHash, ver: 0, actualEpoch, mergeRequestKind: "ttss_meta" })) };
-        } else if (ttssSetupMode === "deferred") {
-          ttssAttach = { ...ttssAttachBase, ...scheduleDeferredTTSSMetaAttach({ body, id, idHash, ver: 0, actualEpoch, mergeRequestKind: "ttss_meta" }) };
-        }
-      }
-      const extra = {
-        total_ms: nowMs() - t0,
-        gas,
-        ttssMergeMode: waitConfirm ? ttssSetupMode : "none",
-        ttssMergeScheduled: ttssAttach.ttssMergeScheduled ? 1 : 0,
-        ttssDeferredScheduled: ttssAttach.ttssMergeScheduled ? 1 : 0,
-        ttssMerged: ttssAttach.ttssMerged ? 1 : 0,
-        ttssVkSetHash: ttssAttach.ttssVkSetHash,
-        ttssMetaHash: ttssAttach.ttssMetaHash,
-        ttssMetaTxHash: ttssAttach.ttssMetaTxHash,
-        ttssEpoch: ttssAttach.ttssEpoch,
-        ...(includeSnapshot ? buildInlineReadySnapshotFromCache(id, 0) : {}),
-      };
-      return res.type("text/plain").send(semicolonKV(opResponseKV(fresh, extra)));
-    } catch (e) {
-      try {
-        const rec = await getRecordOnchain(id);
-        if (rec && rec.active) {
-          await refreshMirrorEntryFromChain(id);
-          await runInlineReadyRefresh("idempotent:/registerZk", [id], [op.opId], { fullSync: false });
-          updateOperation(op.opId, { status: "ROOT_REBUILT", owner: rec.owner, recovery: rec.recovery, currentVersion: Number(rec.version), lastError: parseEthersError(e) });
-          const fresh = await updateOperationReadinessFromCache(op.opId);
-          const extra = { idempotent: 1, total_ms: nowMs() - t0, ...(includeSnapshot ? buildInlineReadySnapshotFromCache(id, 0) : {}) };
-      return res.type("text/plain").send(semicolonKV(opResponseKV(fresh, extra)));
-        }
-      } catch {}
-      failOperation(op.opId, parseEthersError(e));
-      return res.type("text/plain").send(semicolonKV({ ok: 0, err: "registerZk_fail", detail: parseEthersError(e), opId: op.opId, requestKey }));
-    }
-  } catch (e) {
-    return res.type("text/plain").send(semicolonKV({ ok: 0, err: "registerZk_fail", detail: parseEthersError(e) }));
-  }
-});
-
-app.post("/applyUpdateZk", async (req, res) => {
-  const t0 = nowMs();
-  try {
-    const body = req.body || {};
-    const id = bodyString(body.id);
-    const newCidHex = ensure0x64(body.newCidHex);
-    const pkNormHash = ensure0x64(body.pkNormHash);
-    const pkRecHash = ensure0x64(body.pkRecHash);
-    const providedOwnerSeed = ensure0x64(body.ownerSeedHex);
-    const waitRaw = (body.wait ?? "0");
-    const waitConfirm = String(waitRaw) === "1";
-    const confirmations = Math.max(1, parseInt(String(body.confirmations ?? "1"), 10));
-    const includeSnapshot = String(body.includeSnapshot ?? "0") === "1";
-
-    if (!id) return res.type("text/plain").send("ok=0;err=missing_id");
-    if (!newCidHex || !pkNormHash || !pkRecHash) return res.type("text/plain").send("ok=0;err=bad_hex");
-
-    const keySlot = getOrCreateKeySlot(id);
-    const ownerSeedHex = providedOwnerSeed || keySlot.ownerSeedHex;
-    if (!ownerSeedHex) return res.type("text/plain").send("ok=0;err=missing_ownerSeedHex");
-
-    const ownerW = walletFromSeedHex(ownerSeedHex);
-    const rec = await getRecordOnchain(id);
-    if (getAddress(ownerW.address) !== getAddress(rec.owner)) {
-      return res.type("text/plain").send(semicolonKV({ ok: 0, err: "owner_seed_mismatch", onchain: rec.owner, derived: ownerW.address }));
-    }
-
-    await hardhatSetBalance(ownerW.address, "1000");
-    const ownerContract = contract.connect(ownerW);
-    const idHash = rememberId(id);
-    const newVersion = BigInt(rec.version) + 1n;
-    const tx = await sendContractTxLocked(ownerW, (ov) => ownerContract.applyUpdateZK(idHash, newCidHex, pkNormHash, pkRecHash, newVersion, ov));
-    const mirrorPatch = async () => {
-      state.mirror[idHash] = { idHash, cid: newCidHex, pkNormHash, pkRecHash, owner: getAddress(ownerW.address), recovery: getAddress(rec.recovery), version: Number(newVersion), active: true };
-      saveState();
-    };
-
-    let confirm_ms = 0; let gas = "";
-    if (waitConfirm) {
-      const t1 = nowMs();
-      const settled = await waitForTxAndRefresh(tx, { confirmations, id, reason: "http:/applyUpdateZk", onMirrorPatch: mirrorPatch, awaitReady: true });
-      confirm_ms = nowMs() - t1;
-      gas = settled.receipt && settled.receipt.gasUsed ? settled.receipt.gasUsed.toString() : "";
-    } else {
-      scheduleTxSettlement(tx, { confirmations, id, reason: "txwait:/applyUpdateZk", onMirrorPatch: mirrorPatch, awaitReady: true });
-    }
-    return res.type("text/plain").send(semicolonKV({ ok: 1, total_ms: nowMs() - t0, confirm_ms, gas, version: newVersion.toString() }));
-  } catch (e) {
-    return res.type("text/plain").send(semicolonKV({ ok: 0, err: "applyUpdateZk_fail", detail: parseEthersError(e) }));
-  }
-});
-
-app.post("/applyRecoveryRotateZk", async (req, res) => {
-  const t0 = nowMs();
-  try {
-    const body = req.body || {};
-    const id = bodyString(body.id);
-    const newCidHex = ensure0x64(body.newCidHex);
-    const pkNormHash = ensure0x64(body.pkNormHash);
-    const pkRecHash = ensure0x64(body.pkRecHash);
-    const providedRecoverySeed = ensure0x64(body.recoverySeedHex);
-    const newOwnerSeedHex = ensure0x64(body.newOwnerSeedHex || body.ownerSeedHex);
-    const newRecoverySeedHex = ensure0x64(body.newRecoverySeedHex);
-    const waitRaw = (body.wait ?? "0");
-    const waitConfirm = String(waitRaw) === "1";
-    const confirmations = Math.max(1, parseInt(String(body.confirmations ?? "1"), 10));
-    const includeSnapshot = String(body.includeSnapshot ?? "0") === "1";
-
-    if (!id) return res.type("text/plain").send("ok=0;err=missing_id");
-    if (!newCidHex || !pkNormHash || !pkRecHash) return res.type("text/plain").send("ok=0;err=bad_hex");
-    if (!newOwnerSeedHex || !newRecoverySeedHex) return res.type("text/plain").send("ok=0;err=missing_new_seeds");
-
-    const keySlot = getOrCreateKeySlot(id);
-    const recoverySeedHex = providedRecoverySeed || keySlot.recoverySeedHex;
-    if (!recoverySeedHex) return res.type("text/plain").send("ok=0;err=missing_recoverySeedHex");
-
-    const recoveryW = walletFromSeedHex(recoverySeedHex);
-    const rec = await getRecordOnchain(id);
-    if (getAddress(recoveryW.address) !== getAddress(rec.recovery)) {
-      return res.type("text/plain").send(semicolonKV({ ok: 0, err: "recovery_seed_mismatch", onchain: rec.recovery, derived: recoveryW.address }));
-    }
-
-    const newOwnerW = walletFromSeedHex(newOwnerSeedHex);
-    const newRecoveryW = walletFromSeedHex(newRecoverySeedHex);
-    await hardhatSetBalance(recoveryW.address, "1000");
-    await hardhatSetBalance(newOwnerW.address, "1000");
-    await hardhatSetBalance(newRecoveryW.address, "1000");
-
-    const recoveryContract = contract.connect(recoveryW);
-    const idHash = rememberId(id);
-
-    const chainVersion = BigInt(rec.version);
-    const hasBodyNewVersion = body.newVersion !== undefined || body.version !== undefined;
-    const hasBodyOldVersion = body.oldVersion !== undefined || body.currentVersion !== undefined;
-
-    let requestedNewVersion = chainVersion + 1n;
-    if (hasBodyNewVersion) {
-      try {
-        requestedNewVersion = BigInt(String(body.newVersion ?? body.version));
-      } catch {
-        return res.type("text/plain").send(semicolonKV({ ok: 0, err: "bad_new_version" }));
-      }
-    }
-
-    let requestedOldVersion = chainVersion;
-    if (hasBodyOldVersion) {
-      try {
-        requestedOldVersion = BigInt(String(body.oldVersion ?? body.currentVersion));
-      } catch {
-        return res.type("text/plain").send(semicolonKV({ ok: 0, err: "bad_old_version" }));
-      }
-    }
-
-    if (requestedOldVersion !== chainVersion) {
-      return res.type("text/plain").send(semicolonKV({
-        ok: 0,
-        err: "old_version_mismatch",
-        onchainVersion: chainVersion.toString(),
-        requestedOldVersion: requestedOldVersion.toString(),
-      }));
-    }
-    if (requestedNewVersion !== chainVersion + 1n) {
-      return res.type("text/plain").send(semicolonKV({
-        ok: 0,
-        err: "bad_new_version",
-        onchainVersion: chainVersion.toString(),
-        requestedNewVersion: requestedNewVersion.toString(),
-      }));
-    }
-
-    const newVersion = requestedNewVersion;
-    const requestKey = defaultRequestKey("recovery", id, body.requestId, newVersion.toString());
-
-    const existing = getOpByRequestKey(requestKey);
-    if (existing && existing.status !== "FAILED") {
-      const fresh = await updateOperationReadinessFromCache(existing.opId);
-      const extra = { idempotent: 1, total_ms: nowMs() - t0, ...(includeSnapshot ? buildInlineReadySnapshotFromCache(id, 0) : {}) };
-      return res.type("text/plain").send(semicolonKV(opResponseKV(fresh, extra)));
-    }
-
-    const op = createOperation("recovery", id, requestKey, {
-      status: "ACCEPTED",
-      minVersion: Number(newVersion),
-      targetVersion: Number(newVersion),
-      currentVersion: Number(rec ? rec.version : ver),
-      owner: rec.owner,
-      recovery: rec.recovery,
-      currentRoot: state.rootCache.root,
-      currentEpoch: state.rootCache.epoch,
-    });
-
-    const tx = await sendContractTxLocked(recoveryW, (ov) =>
-      recoveryContract.applyRecoveryRotateZK(idHash, newCidHex, pkNormHash, pkRecHash, newVersion, newOwnerW.address, newRecoveryW.address, ov)
-    );
-
-    const updateKeySeeds = async () => {
-      keySlot.ownerSeedHex = newOwnerSeedHex;
-      keySlot.recoverySeedHex = newRecoverySeedHex;
-      saveState();
-      updateOperation(op.opId, { owner: newOwnerW.address, recovery: newRecoveryW.address });
-    };
-    const mirrorPatch = async () => {
-      state.mirror[idHash] = { idHash, cid: newCidHex, pkNormHash, pkRecHash, owner: getAddress(newOwnerW.address), recovery: getAddress(newRecoveryW.address), version: Number(newVersion), active: true };
-      saveState();
-    };
-
-    updateOperation(op.opId, { txHash: tx && tx.hash ? String(tx.hash) : "", submitMs: nowMs() - t0 });
-
-    let gas = "";
-    let settled = null;
-    if (waitConfirm) {
-      settled = await waitForTxAndRefresh(tx, { confirmations, id, reason: "http:/applyRecoveryRotateZk", onConfirmed: updateKeySeeds, onMirrorPatch: mirrorPatch, opId: op.opId, awaitReady: true });
-      gas = settled.receipt && settled.receipt.gasUsed ? settled.receipt.gasUsed.toString() : "";
-    } else {
-      scheduleTxSettlement(tx, { confirmations, id, reason: "txwait:/applyRecoveryRotateZk", onConfirmed: updateKeySeeds, onMirrorPatch: mirrorPatch, opId: op.opId, awaitReady: true });
-    }
-
-    let fresh = waitConfirm ? (await updateOperationReadinessFromCache(op.opId)) : (state.ops[op.opId] || op);
-    const actualEpoch = settled && settled.recompute && settled.recompute.epoch !== undefined ? Number(settled.recompute.epoch) : Number(fresh.currentEpoch !== undefined ? fresh.currentEpoch : state.rootCache.epoch || 0);
-    const ttssInline = { ttssMerged: false, ttssVkSetHash: "", ttssMetaHash: "", ttssMetaTxHash: "", ttssEpoch: 0 };
-    if (waitConfirm) {
-      await ensureSnapshotFreshForVersion(id, Number(newVersion), "http:/applyRecoveryRotateZk:postcheck");
-      fresh = (await updateOperationReadinessFromCache(op.opId)) || fresh;
-    }
-    const ttssMerged = ttssInline.ttssMerged;
-    const ttssVkSetHash = ttssInline.ttssVkSetHash;
-    const ttssMetaHash = ttssInline.ttssMetaHash;
-    const ttssMetaTxHash = ttssInline.ttssMetaTxHash;
-    const ttssEpoch = ttssInline.ttssEpoch;
-
-    return res.type("text/plain").send(semicolonKV(opResponseKV(fresh, {
-      total_ms: nowMs() - t0,
-      gas,
-      newOwner: newOwnerW.address,
-      newRecovery: newRecoveryW.address,
-      currentVersion: chainVersion.toString(),
-      version: newVersion.toString(),
-      targetVersion: newVersion.toString(),
-      oldVersion: chainVersion.toString(),
-      newVersion: newVersion.toString(),
-      ttssMerged: ttssMerged ? 1 : 0,
-      ttssVkSetHash,
-      ttssMetaHash,
-      ttssMetaTxHash,
-      ttssEpoch,
-      ...(includeSnapshot ? buildInlineReadySnapshotFromCache(id, Number(newVersion)) : {}),
-    })));
-  } catch (e) {
-    return res.type("text/plain").send(semicolonKV({ ok: 0, err: "applyRecoveryRotateZk_fail", detail: parseEthersError(e) }));
-  }
-});
+registerRegisterRoutes(app, createRouteContext());
 
 bootstrap()
   .then(() => {
-    
-app.post("/registerTTSSMeta", async (req, res) => {
-  const t0 = nowMs();
-  try {
-    const body = req.body || {};
-    const { id, idHash } = resolveIdAndHash(body, {});
-    const vkSetHash = ensure0x64(body.vkSetHash);
-    const metaHash = ensure0x64(body.metaHash);
-    const waitConfirm = String(body.wait ?? "1") === "1";
-    const confirmations = Math.max(1, parseInt(String(body.confirmations ?? "1"), 10));
-    if (!idHash) return res.status(400).json({ ok: 0, err: "missing_id_or_idHash" });
-    if (!vkSetHash || !metaHash) return res.status(400).json({ ok: 0, err: "bad_hash" });
+    registerTTSSRoutes(app, createRouteContext());
+    registerTraceRoutes(app, createRouteContext());
 
-    const haveExplicitVer = body.ver !== undefined;
-    const haveExplicitEpoch = body.epoch !== undefined;
-    const rec = haveExplicitVer ? null : (id ? await getRecordOnchain(id) : await getRecordByIdHashOnchain(idHash));
-    const ver = haveExplicitVer ? Number(body.ver) : Number(rec.version);
-    const epoch = body.epoch !== undefined ? Number(body.epoch) : Number(state.rootCache.epoch);
-    if (!Number.isFinite(ver) || ver < 0) return res.status(400).json({ ok: 0, err: "bad_ver" });
-    if (!Number.isFinite(epoch) || epoch < 0) return res.status(400).json({ ok: 0, err: "bad_epoch" });
-
-    const requestKey = defaultRequestKey("ttss_meta", id || idHash, body.requestId, `${ver}`);
-    const existingLocal = state.ttssMeta[idHash] || null;
-    if (ttssMetaMatchesLocalEntry(existingLocal, ver, epoch, vkSetHash, metaHash)) {
-      const effectiveMeta = buildTTSSMetaEffective(existingLocal, { id: id || state.idByHash[idHash] || "", idHash, ver, epoch, vkSetHash, metaHash, requestKey });
-      return res.json({ ok: 1, accepted: 1, ready: 1, status: "READY", idempotent: 1, total_ms: nowMs() - t0, idHash, ver, epoch, vkSetHash, metaHash, txHash: bodyString(effectiveMeta.txHash || ""), effectiveMeta });
-    }
-    const existing = getOpByRequestKey(requestKey);
-    if (existing && existing.status !== "FAILED") {
-      const fresh = await updateOperationReadinessFromCache(existing.opId);
-      const effectiveMeta = ttssMetaMatchesLocalEntry(state.ttssMeta[idHash] || null, ver, epoch, vkSetHash, metaHash)
-        ? buildTTSSMetaEffective(state.ttssMeta[idHash], { id: id || state.idByHash[idHash] || "", idHash, ver, epoch, vkSetHash, metaHash, requestKey })
-        : undefined;
-      return res.json({ ...opResponseKV(fresh, { idempotent: 1, total_ms: nowMs() - t0 }), idHash, ver, epoch, vkSetHash, metaHash, ...(effectiveMeta ? { effectiveMeta, txHash: bodyString(effectiveMeta.txHash || "") } : {}) });
-    }
-
-    const op = createOperation("ttss_meta", id || idHash, requestKey, {
-      status: "ACCEPTED",
-      idHash,
-      minVersion: ver,
-      targetVersion: ver,
-      currentVersion: Number(rec ? rec.version : ver),
-      currentRoot: state.rootCache.root,
-      currentEpoch: state.rootCache.epoch,
-    });
-
-    const tx = await sendContractTxLocked(
-      rootUpdaterWallet,
-      (ov) => rootUpdaterContract.setTTSSMeta(idHash, BigInt(ver), BigInt(epoch), vkSetHash, metaHash, ov),
-      { label: "/registerTTSSMeta:setTTSSMeta" }
-    );
-    updateOperation(op.opId, { txHash: tx && tx.hash ? String(tx.hash) : "", submitMs: nowMs() - t0 });
-
-    let gas = "";
-    if (waitConfirm) {
-      const receipt = await tx.wait(confirmations);
-      gas = receipt && receipt.gasUsed ? receipt.gasUsed.toString() : "";
-      updateOperation(op.opId, { status: "ONCHAIN_CONFIRMED", txHash: receipt && receipt.hash ? String(receipt.hash) : (tx && tx.hash ? String(tx.hash) : ""), confirmMs: nowMs() - t0 });
-    }
-
-    storeTTSSMetaLocal({
-      id: id || state.idByHash[idHash] || "",
-      idHash,
-      ver,
-      epoch,
-      vkSetHash,
-      metaHash,
-      txHash: tx && tx.hash ? String(tx.hash) : "",
-      requestKey,
-    });
-
-    const effectiveMeta = state.ttssMeta[idHash] || { idHash, ver, epoch, vkSetHash, metaHash };
-    const fresh = waitConfirm ? (updateOperation(op.opId, { status: "READY", ready: true, currentRoot: state.rootCache.root, currentEpoch: state.rootCache.epoch }) || state.ops[op.opId] || op) : op;
-    return res.json({
-      ...opResponseKV(fresh, { total_ms: nowMs() - t0, gas, stable: waitConfirm ? 1 : 0 }),
-      idHash,
-      ver,
-      epoch,
-      vkSetHash,
-      metaHash,
-      txHash: tx && tx.hash ? String(tx.hash) : "",
-      effectiveMeta,
-    });
-  } catch (e) {
-    return res.status(500).json({ ok: 0, err: "register_ttss_meta_fail", detail: parseEthersError(e) });
-  }
-});
-
-app.post("/applyRecoveryRotateTTSS", async (req, res) => {
-  const t0 = nowMs();
-  try {
-    const body = req.body || {};
-    const { id, idHash } = resolveIdAndHash(body, {});
-    const vkSetHash = ensure0x64(body.vkSetHash);
-    const metaHash = ensure0x64(body.metaHash);
-    const waitConfirm = String(body.wait ?? "1") === "1";
-    const confirmations = Math.max(1, parseInt(String(body.confirmations ?? "1"), 10));
-    if (!idHash) return res.status(400).json({ ok: 0, err: "missing_id_or_idHash" });
-    if (!vkSetHash || !metaHash) return res.status(400).json({ ok: 0, err: "bad_hash" });
-
-    const haveExplicitVer = body.ver !== undefined;
-    const rec = haveExplicitVer ? null : (id ? await getRecordOnchain(id) : await getRecordByIdHashOnchain(idHash));
-    const ver = haveExplicitVer ? Number(body.ver) : Number(rec.version);
-    const epoch = body.epoch !== undefined ? Number(body.epoch) : Number(state.rootCache.epoch);
-    if (!Number.isFinite(ver) || ver < 0) return res.status(400).json({ ok: 0, err: "bad_ver" });
-    if (!Number.isFinite(epoch) || epoch < 0) return res.status(400).json({ ok: 0, err: "bad_epoch" });
-
-    const requestKey = defaultRequestKey("ttss_meta_rotate", id || idHash, body.requestId, `${ver}`);
-    const existingLocal = state.ttssMeta[idHash] || null;
-    if (ttssMetaMatchesLocalEntry(existingLocal, ver, epoch, vkSetHash, metaHash)) {
-      const effectiveMeta = buildTTSSMetaEffective(existingLocal, { id: id || state.idByHash[idHash] || "", idHash, ver, epoch, vkSetHash, metaHash, requestKey });
-      return res.json({ ok: 1, accepted: 1, ready: 1, status: "READY", idempotent: 1, total_ms: nowMs() - t0, idHash, ver, epoch, vkSetHash, metaHash, txHash: bodyString(effectiveMeta.txHash || ""), effectiveMeta });
-    }
-    const existing = getOpByRequestKey(requestKey);
-    if (existing && existing.status !== "FAILED") {
-      const fresh = await updateOperationReadinessFromCache(existing.opId);
-      const effectiveMeta = ttssMetaMatchesLocalEntry(state.ttssMeta[idHash] || null, ver, epoch, vkSetHash, metaHash)
-        ? buildTTSSMetaEffective(state.ttssMeta[idHash], { id: id || state.idByHash[idHash] || "", idHash, ver, epoch, vkSetHash, metaHash, requestKey })
-        : undefined;
-      return res.json({ ...opResponseKV(fresh, { idempotent: 1, total_ms: nowMs() - t0 }), idHash, ver, epoch, vkSetHash, metaHash, ...(effectiveMeta ? { effectiveMeta, txHash: bodyString(effectiveMeta.txHash || "") } : {}) });
-    }
-
-    const opCurrentVersion = Number(rec ? rec.version : ver);
-    const op = createOperation("ttss_meta_rotate", id || idHash, requestKey, {
-      status: "ACCEPTED",
-      idHash,
-      minVersion: ver,
-      targetVersion: ver,
-      currentVersion: opCurrentVersion,
-      currentRoot: state.rootCache.root,
-      currentEpoch: state.rootCache.epoch,
-    });
-
-    const runRotateMetaWrite = async () => {
-      const jobStart = nowMs();
-      try {
-        const tx = await sendContractTxLocked(
-          rootUpdaterWallet,
-          (ov) => rootUpdaterContract.setTTSSMeta(idHash, BigInt(ver), BigInt(epoch), vkSetHash, metaHash, ov),
-          { label: "/applyRecoveryRotateTTSS:setTTSSMeta" }
-        );
-        updateOperation(op.opId, { txHash: tx && tx.hash ? String(tx.hash) : "", submitMs: nowMs() - jobStart });
-        const receipt = await tx.wait(confirmations);
-        const gas = receipt && receipt.gasUsed ? receipt.gasUsed.toString() : "";
-        const txHash = receipt && receipt.hash ? String(receipt.hash) : (tx && tx.hash ? String(tx.hash) : "");
-        updateOperation(op.opId, { status: "ONCHAIN_CONFIRMED", txHash, confirmMs: nowMs() - jobStart, gas });
-        storeTTSSMetaLocal({
-          id: id || state.idByHash[idHash] || "",
-          idHash,
-          ver,
-          epoch,
-          vkSetHash,
-          metaHash,
-          txHash,
-          requestKey,
-        });
-        updateOperation(op.opId, { status: "READY", ready: true, currentRoot: state.rootCache.root, currentEpoch: state.rootCache.epoch, txHash });
-      } catch (e) {
-        failOperation(op.opId, parseEthersError(e));
-        console.error(`[bb_service_zk] applyRecoveryRotateTTSS async failed (${id || idHash}): ${parseEthersError(e)}`);
-      }
-    };
-
-    if (waitConfirm) {
-      await runRotateMetaWrite();
-      const effectiveMeta = state.ttssMeta[idHash] || { idHash, ver, epoch, vkSetHash, metaHash };
-      const fresh = state.ops[op.opId] || op;
-      return res.json({
-        ...opResponseKV(fresh, { total_ms: nowMs() - t0, stable: 1 }),
-        idHash,
-        ver,
-        epoch,
-        vkSetHash,
-        metaHash,
-        txHash: bodyString(effectiveMeta.txHash || ""),
-        effectiveMeta,
-      });
-    }
-
-    void runRotateMetaWrite();
-    return res.json({
-      ...opResponseKV(op, { total_ms: nowMs() - t0, stable: 0, asyncAccepted: 1 }),
-      idHash,
-      ver,
-      epoch,
-      vkSetHash,
-      metaHash,
-      txHash: "",
-    });
-  } catch (e) {
-    return res.status(500).json({ ok: 0, err: "apply_recovery_rotate_ttss_fail", detail: parseEthersError(e) });
-  }
-});
-
-app.get("/ttssMeta", async (req, res) => {
-  try {
-    const { id, idHash } = resolveIdAndHash({}, req.query || {});
-    if (!idHash) return res.status(400).json({ ok: 0, err: "missing_id_or_idHash" });
-    const local = state.ttssMeta[idHash] || null;
-    const onchain = await getTTSSMetaOnchain(idHash);
-    const effective = {
-      id: id || (local && local.id) || state.idByHash[idHash] || "",
-      idHash,
-      ver: local && local.ver !== undefined ? Number(local.ver) : Number(onchain.ver),
-      epoch: local && local.epoch !== undefined ? Number(local.epoch) : Number(onchain.epoch),
-      vkSetHash: (local && local.vkSetHash) || zeroHex32(onchain.vkSetHash),
-      metaHash: (local && local.metaHash) || zeroHex32(onchain.metaHash),
-      onchain,
-      local,
-    };
-    return res.json({ ok: 1, ...effective });
-  } catch (e) {
-    return res.status(500).json({ ok: 0, err: "ttss_meta_fail", detail: parseEthersError(e) });
-  }
-});
-
-app.post("/publishTrace", async (req, res) => {
-  const t0 = nowMs();
-  try {
-    const body = req.body || {};
-    const { id, idHash } = resolveIdAndHash(body, {});
-    const accusedSetHash = ensure0x64(body.accusedSetHash);
-    const proofHash = ensure0x64(body.proofHash);
-    const traceDigest = ensure0x64(body.traceDigest);
-    const waitConfirm = String(body.wait ?? "1") === "1";
-    const confirmations = Math.max(1, parseInt(String(body.confirmations ?? "1"), 10));
-    if (!idHash) return res.status(400).json({ ok: 0, err: "missing_id_or_idHash" });
-    if (!accusedSetHash || !proofHash || !traceDigest) return res.status(400).json({ ok: 0, err: "bad_hash" });
-
-    const rec = id ? await getRecordOnchain(id) : await getRecordByIdHashOnchain(idHash);
-    const ver = body.ver !== undefined ? Number(body.ver) : Number(rec.version);
-    const epoch = body.epoch !== undefined ? Number(body.epoch) : Number(state.rootCache.epoch);
-    if (!Number.isFinite(ver) || ver < 0) return res.status(400).json({ ok: 0, err: "bad_ver" });
-    if (!Number.isFinite(epoch) || epoch < 0) return res.status(400).json({ ok: 0, err: "bad_epoch" });
-
-    const requestKey = defaultRequestKey("trace_publish", id || idHash, body.requestId, `${ver}`);
-    const existing = getOpByRequestKey(requestKey);
-    if (existing && existing.status !== "FAILED") {
-      const fresh = await updateOperationReadinessFromCache(existing.opId);
-      return res.json({ ...opResponseKV(fresh, { idempotent: 1, total_ms: nowMs() - t0 }), idHash, ver, epoch, accusedSetHash, proofHash, traceDigest });
-    }
-
-    const op = createOperation("trace_publish", id || idHash, requestKey, {
-      status: "ACCEPTED",
-      idHash,
-      minVersion: ver,
-      targetVersion: ver,
-      currentVersion: Number(rec.version),
-      currentRoot: state.rootCache.root,
-      currentEpoch: state.rootCache.epoch,
-    });
-
-    const tx = await sendContractTxLocked(
-      rootUpdaterWallet,
-      (ov) => rootUpdaterContract.publishTraceResult(idHash, BigInt(ver), BigInt(epoch), accusedSetHash, proofHash, traceDigest, ov),
-      { label: "/publishTraceResult:publishTraceResult" }
-    );
-    updateOperation(op.opId, { txHash: tx && tx.hash ? String(tx.hash) : "", submitMs: nowMs() - t0 });
-
-    let gas = "";
-    if (waitConfirm) {
-      const settled = await waitForTxAndRefresh(tx, {
-        confirmations,
-        id: id || (state.idByHash[idHash] || ""),
-        reason: "http:/publishTrace",
-        opId: op.opId,
-        awaitReady: false,
-      });
-      gas = settled.receipt && settled.receipt.gasUsed ? settled.receipt.gasUsed.toString() : "";
-    }
-
-    storeTraceAnchorLocal({
-      id: id || state.idByHash[idHash] || "",
-      idHash,
-      ver,
-      epoch,
-      accusedSetHash,
-      proofHash,
-      traceDigest,
-      txHash: tx && tx.hash ? String(tx.hash) : "",
-      requestKey,
-      traceResultPath: bodyString(body.traceResultPath || ""),
-    });
-
-    const fresh = waitConfirm ? (state.ops[op.opId] || op) : op;
-    return res.json({
-      ...opResponseKV(fresh, { total_ms: nowMs() - t0, gas }),
-      idHash,
-      ver,
-      epoch,
-      accusedSetHash,
-      proofHash,
-      traceDigest,
-      txHash: tx && tx.hash ? String(tx.hash) : "",
-    });
-  } catch (e) {
-    return res.status(500).json({ ok: 0, err: "publish_trace_fail", detail: parseEthersError(e) });
-  }
-});
-
-app.listen(PORT, () => {
+    app.listen(PORT, () => {
       console.log(`[bb_service_zk] listening on :${PORT}`);
       console.log(`[bb_service_zk] CONTRACT=${CONTRACT_ADDR}`);
       console.log(`[bb_service_zk] TREE_DEPTH=${TREE_DEPTH}`);

@@ -10,7 +10,7 @@ scripts/dev.sh smoke
 scripts/dev.sh down
 ```
 
-scripts/dev.sh loads config/dev.env by default. Use another config file:
+`scripts/dev.sh` loads `config/dev.env` by default. Use another config file:
 
 ```bash
 DID_E2E_CONFIG=config/my-dev.env scripts/dev.sh up
@@ -41,4 +41,12 @@ docker compose down
 
 ## Experiments
 
-Experiment runners live under experiments/runs/. Start the native or Docker stack first, then invoke the desired runner from the repository root. See experiments/README.md for the directory map and examples.
+Experiment runners live under `experiments/runs/`. Start the native or Docker stack first, then invoke the desired runner from the repository root. See `docs/EXPERIMENTS.md` for the maintained runner list, output conventions, and smoke recommendations.
+
+## Related Docs
+
+- `docs/CONFIGURATION.md`: ports, TTSS parameters, paths, and timeout knobs.
+- `docs/TESTING.md`: local checks and CI coverage.
+- `docs/EXPERIMENTS.md`: maintained experiment scripts and removed legacy categories.
+- `docs/THREAT_MODEL.md`: security assumptions and non-production boundaries.
+- `docs/RELEASE.md`: release checklist and tagging process.

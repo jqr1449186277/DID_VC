@@ -7,7 +7,6 @@ ROOT="${ROOT:-${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}}"
 OUT_BASE="${OUT_BASE:-$ROOT/results}"
 RUN_J_SCRIPT="${RUN_J_SCRIPT:-$ROOT/experiments/runs/run_J_ttss_recover_batch.sh}"
 RUN_K_SCRIPT="${RUN_K_SCRIPT:-$ROOT/experiments/runs/run_K_ttss_trace_batch.sh}"
-RUN_I_SCRIPT="${RUN_I_SCRIPT:-$ROOT/experiments/runs/run_I_zk_scale.sh}"
 BIN="${BIN:-$ROOT/build/did_demo_zk}"
 BB="${BB:-http://127.0.0.1:3000}"
 PIRATE="${PIRATE:-http://127.0.0.1:4000}"
@@ -16,7 +15,6 @@ COMMITTEE_URLS="${COMMITTEE_URLS:-http://127.0.0.1:8001,http://127.0.0.1:8002,ht
 PROJECT_ROOT="${PROJECT_ROOT:-$ROOT}"
 ENABLE_RECOVER="${ENABLE_RECOVER:-1}"
 ENABLE_TRACE="${ENABLE_TRACE:-1}"
-ENABLE_ZK_DEPTH="${ENABLE_ZK_DEPTH:-0}"
 RECOVER_RUNS="${RECOVER_RUNS:-3}"
 TRACE_RUNS="${TRACE_RUNS:-3}"
 TRACE_MAX_RETRIES="${TRACE_MAX_RETRIES:-2}"
@@ -28,9 +26,6 @@ TRACE_DELTA="${TRACE_DELTA:-0.000001}"
 TRACE_MAX_QUERIES_LIST="${TRACE_MAX_QUERIES_LIST:-3,5}"
 TRACE_CHALLENGE_COUNT_LIST="${TRACE_CHALLENGE_COUNT_LIST:-1}"
 PAIR_LIST="${PAIR_LIST:-auto}"
-ZK_DEPTH_LIST="${ZK_DEPTH_LIST:-16 20 24 28}"
-ZK_RUNS_PER_DEPTH="${ZK_RUNS_PER_DEPTH:-3}"
-ZK_BB_EACH="${ZK_BB_EACH:-0}"
 TIMEOUT_MS="${TIMEOUT_MS:-120000}"
 REGISTER_WAIT_MS="${REGISTER_WAIT_MS:-5000}"
 PATH_WAIT_MS="${PATH_WAIT_MS:-5000}"
@@ -197,45 +192,6 @@ run_trace_point(){
   [[ "$status" == "pass" ]]
 }
 
-run_zk_depth_scale(){
-  local job_dir="$1/zk_depth"
-  mkdir -p "$job_dir"
-  [[ -f "$RUN_I_SCRIPT" ]] || { append_agg zk_depth fail "" "" "" "" "all" 0 0 0 0 0 0 0 0 0 0 0 0 0 "$job_dir" "missing run_I_zk_scale.sh"; return 1; }
-  log "zk depth scale depths=$ZK_DEPTH_LIST runs_per_depth=$ZK_RUNS_PER_DEPTH out=$job_dir"
-  local status="pass" err=""
-  if PROJECT_ROOT="$PROJECT_ROOT" OUT="$job_dir" DEPTHS="$ZK_DEPTH_LIST" RUNS_PER_DEPTH="$ZK_RUNS_PER_DEPTH" BB_EACH="$ZK_BB_EACH" bash "$RUN_I_SCRIPT" >>"$RUN_LOG" 2>&1; then
-    :
-  else
-    status="fail"
-    err="run_I_zk_scale failed"
-  fi
-  local depth
-  for depth in $ZK_DEPTH_LIST; do
-    local csv_path="$job_dir/depth_${depth}.csv"
-    if [[ -f "$csv_path" ]]; then
-      local stats
-      stats="$(python3 - "$csv_path" <<'PY'
-import csv,json,sys
-from statistics import mean
-rows=list(csv.DictReader(open(sys.argv[1], newline='', encoding='utf-8')))
-if not rows:
-    print(json.dumps({'runs':0,'pass_count':0,'pass_rate':0.0,'avg_prove_ms':0.0,'avg_verify_ms':0.0}))
-    raise SystemExit(0)
-pass_count=sum(1 for r in rows if str(r.get('ok','0'))=='1')
-prove=[float(r['prove_ms']) for r in rows if r.get('prove_ms')]
-verify=[float(r['verify_ms']) for r in rows if r.get('verify_ms')]
-print(json.dumps({'runs':len(rows),'pass_count':pass_count,'pass_rate':round(pass_count/len(rows),6),'avg_prove_ms':round(mean(prove),3) if prove else 0.0,'avg_verify_ms':round(mean(verify),3) if verify else 0.0}))
-PY
-)"
-      append_agg zk_depth "$status" "" "" "" "" "$depth" "$(jq -r '.runs // 0' <<<"$stats")" "$(jq -r '.pass_count // 0' <<<"$stats")" "$(jq -r '.pass_rate // 0' <<<"$stats")" 0 0 0 "$(jq -r '.avg_prove_ms // 0' <<<"$stats")" 0 0 "$(jq -r '.avg_verify_ms // 0' <<<"$stats")" 0 0 0 "$csv_path" "$err"
-    else
-      append_agg zk_depth fail "" "" "" "" "$depth" 0 0 0 0 0 0 0 0 0 0 0 0 0 "$job_dir" "missing $csv_path"
-      status="fail"
-    fi
-  done
-  [[ "$status" == "pass" ]]
-}
-
 check_health
 write_agg_header
 
@@ -249,7 +205,6 @@ jq -nc \
   --arg out_dir "$OUT_DIR" \
   --arg run_j_script "$RUN_J_SCRIPT" \
   --arg run_k_script "$RUN_K_SCRIPT" \
-  --arg run_i_script "$RUN_I_SCRIPT" \
   --arg bb "$BB" \
   --arg pirate "$PIRATE" \
   --arg token "$TOKEN" \
@@ -257,13 +212,11 @@ jq -nc \
   --arg pair_list "$PAIR_LIST" \
   --arg trace_max_queries_list "$TRACE_MAX_QUERIES_LIST" \
   --arg trace_challenge_count_list "$TRACE_CHALLENGE_COUNT_LIST" \
-  --arg zk_depth_list "$ZK_DEPTH_LIST" \
   --argjson enable_recover "$ENABLE_RECOVER" \
   --argjson enable_trace "$ENABLE_TRACE" \
-  --argjson enable_zk_depth "$ENABLE_ZK_DEPTH" \
   --argjson recover_runs "$RECOVER_RUNS" \
   --argjson trace_runs "$TRACE_RUNS" \
-  '{root:$root,out_dir:$out_dir,run_j_script:$run_j_script,run_k_script:$run_k_script,run_i_script:$run_i_script,bb:$bb,pirate:$pirate,token:$token,committee_urls:$committee_urls,pair_list:$pair_list,trace_max_queries_list:$trace_max_queries_list,trace_challenge_count_list:$trace_challenge_count_list,zk_depth_list:$zk_depth_list,enable_recover:$enable_recover,enable_trace:$enable_trace,enable_zk_depth:$enable_zk_depth,recover_runs:$recover_runs,trace_runs:$trace_runs}' > "$CONFIG_JSON"
+  '{root:$root,out_dir:$out_dir,run_j_script:$run_j_script,run_k_script:$run_k_script,bb:$bb,pirate:$pirate,token:$token,committee_urls:$committee_urls,pair_list:$pair_list,trace_max_queries_list:$trace_max_queries_list,trace_challenge_count_list:$trace_challenge_count_list,enable_recover:$enable_recover,enable_trace:$enable_trace,recover_runs:$recover_runs,trace_runs:$trace_runs}' > "$CONFIG_JSON"
 
 overall_ok=1
 IFS=',' read -r -a pair_arr <<< "$PAIR_LIST"
@@ -300,10 +253,6 @@ for pair in "${pair_arr[@]}"; do
     done
   fi
 done
-
-if [[ "$ENABLE_ZK_DEPTH" == "1" ]]; then
-  run_zk_depth_scale "$OUT_DIR" || overall_ok=0
-fi
 
 log "done: out=$OUT_DIR aggregate=$AGG_CSV"
 if [[ "$overall_ok" == "1" ]]; then

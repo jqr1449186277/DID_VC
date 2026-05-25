@@ -25,7 +25,7 @@ DID E2E is a local end-to-end demo for DID state registration, ZK authentication
 
 ## Experiments
 
-Research and batch scripts live under experiments/ so the stable scripts/ directory stays focused on build and development operations. experiments/runs/ contains scenario drivers; experiments/lib/ contains instrumentation helpers; experiments/tools/ contains summarizers and figure scripts.
+Research and batch scripts live under `experiments/` so the stable `scripts/` directory stays focused on build and development operations. `experiments/runs/` contains maintained scenario drivers, `experiments/lib/` contains instrumentation helpers, and `experiments/tools/` contains result summarizers.
 
 ## Runtime Flow
 
@@ -37,4 +37,4 @@ Research and batch scripts live under experiments/ so the stable scripts/ direct
 
 ## Configuration
 
-The native stack reads `config/dev.env` by default. Set `DID_E2E_CONFIG=/path/to/file.env` to use another configuration file. Environment variables always remain override-friendly because `config/dev.env` uses shell default expansion.
+The native stack reads `config/dev.env` by default. Set `DID_E2E_CONFIG=/path/to/file.env` to use another configuration file. Environment variables always remain override-friendly because `config/dev.env` uses shell default expansion. See `docs/CONFIGURATION.md` for the maintained configuration surface.

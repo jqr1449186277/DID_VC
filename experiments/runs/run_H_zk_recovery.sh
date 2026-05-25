@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/run/zk_local_env.sh}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/run/ttss_phase5_env.sh}"
 
 if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
@@ -17,11 +17,11 @@ VERIFY_HEALTH="${DIDZK_VERIFY_SERVICE_HEALTH:-http://127.0.0.1:3400/health}"
 
 RECOVER_CASE="${RECOVER_CASE:-legal}"
 DEPTH="${DEPTH:-20}"
-TIMEOUT_MS="${TIMEOUT_MS:-1000}"
-REGISTER_WAIT_MS="${REGISTER_WAIT_MS:-1000}"
-PATH_WAIT_MS="${PATH_WAIT_MS:-1000}"
-ROOT_WAIT_MS="${ROOT_WAIT_MS:-1000}"
-ROOT_POLL_MS="${ROOT_POLL_MS:-500}"
+TIMEOUT_MS="${TIMEOUT_MS:-30000}"
+REGISTER_WAIT_MS="${REGISTER_WAIT_MS:-120000}"
+PATH_WAIT_MS="${PATH_WAIT_MS:-120000}"
+ROOT_WAIT_MS="${ROOT_WAIT_MS:-60000}"
+ROOT_POLL_MS="${ROOT_POLL_MS:-300}"
 RUN_TAG="${RUN_TAG:-$(date +%Y%m%d_%H%M%S)_$$}"
 RUN_ID="${RUN_ID:-zk_recover_${RUN_TAG}}"
 

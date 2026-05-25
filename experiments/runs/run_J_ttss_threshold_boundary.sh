@@ -9,17 +9,17 @@ OUT_BASE="${OUT_BASE:-$ROOT/results}"
 BB="${BB:-http://127.0.0.1:3000}"
 TOKEN="${TOKEN:-demo-token}"
 COMMITTEE_URLS="${COMMITTEE_URLS:-http://127.0.0.1:8001,http://127.0.0.1:8002,http://127.0.0.1:8003,http://127.0.0.1:8004,http://127.0.0.1:8005,http://127.0.0.1:8006}"
-RUNS="${RUNS:-20}"
-MAX_RETRIES="${MAX_RETRIES:-1}"
+RUNS="${RUNS:-5}"
+MAX_RETRIES="${MAX_RETRIES:-2}"
 RETRY_SLEEP_SEC="${RETRY_SLEEP_SEC:-2}"
 TTSS_N="${TTSS_N:-6}"
 TTSS_T="${TTSS_T:-4}"
 PROJECT_ROOT="${PROJECT_ROOT:-$ROOT}"
-TIMEOUT_MS="${TIMEOUT_MS:-10000}"
-REGISTER_WAIT_MS="${REGISTER_WAIT_MS:-5000}"
-PATH_WAIT_MS="${PATH_WAIT_MS:-5000}"
-ROOT_WAIT_MS="${ROOT_WAIT_MS:-5000}"
-ROOT_POLL_MS="${ROOT_POLL_MS:-100}"
+TIMEOUT_MS="${TIMEOUT_MS:-30000}"
+REGISTER_WAIT_MS="${REGISTER_WAIT_MS:-120000}"
+PATH_WAIT_MS="${PATH_WAIT_MS:-120000}"
+ROOT_WAIT_MS="${ROOT_WAIT_MS:-60000}"
+ROOT_POLL_MS="${ROOT_POLL_MS:-300}"
 BB_ASYNC_SUBMIT="${BB_ASYNC_SUBMIT:-0}"
 
 TS="$(date +%Y%m%d_%H%M%S)"
@@ -112,6 +112,9 @@ run_one_case(){
   local expected_success="0"
   if (( requested_count >= TTSS_T )); then expected_success="1"; fi
 
+  local recover_setup_json="$case_dir/setup_for_recover.json"
+  jq --argjson requested_count "$requested_count" '.t = $requested_count' "$setup_json" > "$recover_setup_json"
+
   local start end
   start="$(now_ms)"
   if "$BIN" --ttss_recover \
@@ -120,8 +123,8 @@ run_one_case(){
       --committee_urls "$COMMITTEE_URLS" \
       --committee_token "$TOKEN" \
       --ttss_n "$TTSS_N" \
-      --ttss_t "$requested_count" \
-      --ttss_state "$setup_json" \
+      --ttss_t "$TTSS_T" \
+      --ttss_state "$recover_setup_json" \
       --project_root "$PROJECT_ROOT" \
       --workdir "$case_dir" \
       --timeout_ms "$TIMEOUT_MS" \
