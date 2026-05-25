@@ -31,6 +31,30 @@ Not yet supported:
 
 See `docs/DID_METHOD.md` for method-design notes, `docs/API.md` for local API details, `docs/CONFIGURATION.md` for runtime configuration, and `docs/THREAT_MODEL.md` for security assumptions.
 
+## Design Overview
+
+DID E2E is organized around a small local identity-state system:
+
+- The Hardhat contract stores the canonical identity record keyed by `idHash` and anchors the active Poseidon-Merkle root plus root epoch.
+- The bulletin-board service mirrors active records off-chain, builds Merkle leaves and paths, submits root updates, and exposes readiness APIs used by the C++ client.
+- The C++ client drives registration, ZK authentication, recovery, TTSS setup/recovery/rotation, and trace publishing from a single CLI.
+- Committee nodes store signed TTSS share envelopes and serve recovery or trace requests only when the share metadata is active.
+- The trace helper models leaked-share evidence and lets experiments verify whether the trace flow identifies the expected guardian set.
+
+The design is intentionally split between on-chain anchors and off-chain experiment services. The chain records identity state, TTSS metadata hashes, trace anchors, and active roots; generated keys, local Merkle caches, witness files, proofs, committee shares, and experiment logs stay in local services and generated output directories.
+
+## Documentation Map
+
+- `docs/ARCHITECTURE.md`: component map, state model, runtime lifecycle, and end-to-end flows.
+- `docs/API.md`: local HTTP APIs, endpoint semantics, and example payloads.
+- `docs/DID_METHOD.md`: how the current implementation maps to a possible future DID method and what W3C DID/VC pieces are missing.
+- `docs/CONFIGURATION.md`: ports, paths, TTSS parameters, and timeout knobs.
+- `docs/EXPERIMENTS.md`: maintained experiment scripts and result conventions.
+- `docs/THREAT_MODEL.md`: trust assumptions, privacy boundary, and non-production warning.
+- `docs/DEPENDENCIES.md`: native, npm, C++ library, and ZK tooling dependencies.
+- `docs/TESTING.md`: local checks and CI coverage.
+- `docs/RELEASE.md`: `v0.1.0` release checklist.
+
 ## Quick Start
 
 ```bash

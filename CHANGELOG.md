@@ -13,6 +13,7 @@ The project is a research prototype and has not published a stable release yet.
 - Documented project boundaries: experimental prototype, non-production use, current DID-like functionality, and missing W3C DID/VC features.
 - Added CI coverage for shell syntax, warning-clean C++ builds, CLI smoke checks, core C++ tests, Hardhat compile, and Docker Compose validation.
 - Added repository hygiene files, threat model, dependency notes, release checklist, Markdown link checks, JavaScript syntax checks, and C++ sanitizer CI for `v0.1.0` preparation.
+- Expanded design documentation for architecture, APIs, DID-method mapping, configuration, experiments, and threat assumptions.
 
 ## Initial Prototype
 
