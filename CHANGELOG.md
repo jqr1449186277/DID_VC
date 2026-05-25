@@ -1,5 +1,7 @@
 # Changelog
 
+[中文说明](CHANGELOG.zh-CN.md) | English
+
 All notable changes to DID E2E are tracked here.
 
 The project is a research prototype and has not published a stable release yet.

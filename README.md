@@ -1,5 +1,7 @@
 # DID E2E
 
+[中文说明](README.zh-CN.md) | English
+
 End-to-end DID demo with ZK auth, TTSS recovery, trace flow, committee nodes, and a local Hardhat chain.
 
 ## Project Status
@@ -45,6 +47,7 @@ The design is intentionally split between on-chain anchors and off-chain experim
 
 ## Documentation Map
 
+- Chinese documentation starts at `README.zh-CN.md` and `docs/zh-CN/README.md`.
 - `docs/ARCHITECTURE.md`: component map, state model, runtime lifecycle, and end-to-end flows.
 - `docs/API.md`: local HTTP APIs, endpoint semantics, and example payloads.
 - `docs/DID_METHOD.md`: how the current implementation maps to a possible future DID method and what W3C DID/VC pieces are missing.

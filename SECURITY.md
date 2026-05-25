@@ -1,5 +1,7 @@
 # Security Policy
 
+[中文说明](SECURITY.zh-CN.md) | English
+
 ## Supported Versions
 
 DID E2E is a research prototype and local demonstration harness. The `main` branch is the only supported branch for security fixes.

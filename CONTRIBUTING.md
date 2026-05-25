@@ -1,5 +1,7 @@
 # Contributing
 
+[中文说明](CONTRIBUTING.zh-CN.md) | English
+
 Thanks for taking a look at DID E2E.
 
 ## Development Setup
